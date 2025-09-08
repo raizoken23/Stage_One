@@ -11,3 +11,5 @@ IF YOU AINT NEVER USE LOCAL AI MODELS BEFORE HERE ARE SOME HELPFUL NOTES BRUH.
 if you aint got 32 gigs, do not run 3 models bro... naw
 if you got a consumer rig with under 24 gigs of virtual ram  run 2 models qwen and minstral are iight
 
+
+i aint need nothing bro, i aint do none of this for fame.  im samoan, we share our food. bro.
