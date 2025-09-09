@@ -1,4 +1,4 @@
-# D:\MASTER_CITADEL\SERVICE_SYSTEM\global_tracker_service.py
+# MASTER_CITADEL\SERVICE_SYSTEM\global_tracker_service.py
 
 r"""
 ╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
