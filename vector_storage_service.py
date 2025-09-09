@@ -1,4 +1,4 @@
-# D:\MASTER_CITADEL\SERVICE_SYSTEM\vector_storage_service.py
+# MASTER_CITADEL\SERVICE_SYSTEM\vector_storage_service.py
 
 # --- Bootstrap Path Injection (For Standalone Execution) ---
 import sys
