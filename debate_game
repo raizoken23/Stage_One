@@ -1,90 +1,91 @@
 # thought_debate_council_game_v2_1_1.py
-from __future__ import annotations # 型ヒントの遅延評価を有効にする
+from __future__ import annotations # Enables postponed evaluation of type hints
 
 """
-👑 自律思考討論カーネル - v2.1.1 👑
-   作成者: nobody@nowhere.net (自己完結型の探求)
+👑 Autonomous Thought Debate Kernel - v2.1.1 👑
+   Authored by: nobody@nowhere.net (A Self-Contained Exploration)
 
-ユーザーが提出した思考について、AI駆動の討論を調整するためのスタンドアロンアプリケーション。
-このモジュールは自己完結型で設計されており、AIエージェントとの構造化された議論を通じて
-アイデアを探求するためのリッチな環境を提供します。
+A standalone application for orchestrating AI-driven debates on user-submitted thoughts.
+This module is designed to be self-reliant, providing a rich environment for
+exploring ideas through structured argumentation with AI agents.
 
 ----------------------------------------------------------------------------------------------------
-🚀 このモジュールの使い方 (スタンドアロンCLIまたはライブラリとして) 🚀
+🚀 HOW TO USE THIS MODULE (Standalone CLI or as a Library) 🚀
 
-**I. コアコンセプト:**
-   このスクリプトは、AIエージェントが異なる役割（賛成、反対、中立評価者、アドバイザー）を担い、
-   与えられた「思考」を複数のラウンドにわたって分析・評価する「討論評議会」をシミュレートします。
-   目標は、思考の強度を判断し、コンセンサスを達成し、その意味合いを探求することです。
+**I. Core Concept:**
+   This script simulates a "Debate Council" where AI agents take on different roles
+   (Pro, Con, Neutral Evaluator, Advisors) to dissect and evaluate a given "thought"
+   over multiple rounds. The goal is to determine the thought's strength, achieve
+   consensus, and explore its implications.
 
-**II. 前提条件とインストール:**
+**II. Prerequisites & Installation:**
 
-   1. Python 3.9+ を推奨 (`from __future__ import annotations`が標準動作のため)。
-   2. 必要なライブラリをインストール:
+   1. Python 3.9+ Recommended (due to `from __future__ import annotations` being standard behavior).
+   2. Install required libraries:
       pip install openai numpy faiss-cpu tenacity pydantic python-dotenv
-      (互換性のあるNVIDIA GPUとCUDAセットアップがある場合は`faiss-cpu`の代わりに`faiss-gpu`を使用)
-   3. グラフ視覚化エクスポートのためのオプション:
+      (Use `faiss-gpu` instead of `faiss-cpu` if you have a compatible NVIDIA GPU and CUDA setup)
+   3. Optional for graph visualization export:
       pip install graphviz
-      (Graphvizシステムツールもインストールされている必要があります: https://graphviz.org/download/)
+      (You also need to have the Graphviz system tools installed: https://graphviz.org/download/)
 
-**III. セットアップ - APIキー (重要！):**
+**III. Setup - API Key (Crucial!):**
 
-   このアプリケーションは、LLMと機能するためにOpenAI APIキーが必要です。
-   - **推奨方法 (環境変数):**
-     `OPENAI_API_KEY`という名前の環境変数に有効なキーを設定します。
-     - Windows (コマンドプロンプト): `set OPENAI_API_KEY=sk-YourActualOpenApiKeyHere`
+   This application requires an OpenAI API key to function with LLMs.
+   - **Recommended Method (Environment Variable):**
+     Set an environment variable named `OPENAI_API_KEY` to your valid key.
+     - Windows (Command Prompt): `set OPENAI_API_KEY=sk-YourActualOpenApiKeyHere`
      - Windows (PowerShell):   `$env:OPENAI_API_KEY="sk-YourActualOpenApiKeyHere"`
      - Linux/macOS (Bash/Zsh): `export OPENAI_API_KEY="sk-YourActualOpenApiKeyHere"`
-   - **代替方法 (.envファイル):**
-     このスクリプトと同じディレクトリ（またはプロジェクトルート）に`.env`という名前のファイルを作成し、
-     `OPENAI_API_KEY="sk-YourActualOpenApiKeyHere"`という行を追加します。
-     (`python-dotenv`がインストールされている必要があります。この方法を使用する場合は、スクリプトの先頭に`from dotenv import load_dotenv; load_dotenv()`を追加してください)。
+   - **Alternative (.env file):**
+     Create a file named `.env` in the same directory as this script (or your project root)
+     and add the line: `OPENAI_API_KEY="sk-YourActualOpenApiKeyHere"`
+     (Requires `python-dotenv` installed. Add `from dotenv import load_dotenv; load_dotenv()` at the top of this script if using this method).
 
-**IV. インタラクティブCLIゲームの実行:**
+**IV. Running the Interactive CLI Game:**
 
-   1. このスクリプトが含まれるディレクトリに移動します。
-   2. 実行: `python thought_debate_council_game_v2_1_1.py` (またはあなたのファイル名)
-   3. **ユーザー名を入力:** ユーザー名の入力を求められます。これは、あなたの討論データを
-      別のフォルダ（例：`./council_cli_user_data_v2_1/your_username/`）に整理するために使用されます。
-   4. **プロンプトに従う:**
-      - 思考/ステートメントを入力して新しい討論を開始します。
-      - そのユーザー名で以前のセッションがある場合は、既存の進行中の討論をロードします。
-      - ラウンドを進めたり、ステータスを表示したり、討論をフォークしたり、データをエクスポートしたり、結論付けたりします。
+   1. Navigate to the directory containing this script.
+   2. Execute: `python thought_debate_council_game_v2_1_1.py` (or your filename)
+   3. **Enter a Username:** You'll be prompted for a username. This is used to organize
+      your debate data in separate folders (e.g., `./council_cli_user_data_v2_1/your_username/`).
+   4. **Follow Prompts:**
+      - Start a new debate by entering a thought/statement.
+      - Load an existing active debate if you have prior sessions under that username.
+      - Advance rounds, view status, fork debates, export data, or conclude.
 
-   **インタラクティブコマンド:**
-     - `[A]dvance` (または単にEnterキーを押す): 次の討論ラウンドに進みます。
-     - `[S]tatus`: 討論の現在の詳細な状態を表示します。
-     - `[F]ork`: 現在の討論に基づいて、変更された思考で新しい討論を作成します。
-     - `[E]xport Map`: 議論をCSVまたはJSONLにエクスポートします。
-     - `[G]raphviz`: 討論の流れをGraphviz DOTファイルとしてエクスポートします。
-     - `[C]onclude`: 現在の討論を終了し、最終的なアドバイザーを実行します。
-     - `[Q]uit`: インタラクティブセッションを終了します。
+   **Interactive Commands:**
+     - `[A]dvance` (or just press Enter): Moves to the next debate round.
+     - `[S]tatus`: Shows the current detailed state of the debate.
+     - `[F]ork`: Creates a new debate based on the current one with a mutated thought.
+     - `[E]xport Map`: Exports arguments to CSV or JSONL.
+     - `[G]raphviz`: Exports the debate flow as a Graphviz DOT file.
+     - `[C]onclude`: Ends the current debate and runs final advisors.
+     - `[Q]uit`: Exits the interactive session.
 
-**V. 構造化テストモードでの実行:**
+**V. Running in Structured Test Mode:**
 
-   このモードでは、期待される結果に対して討論シナリオの自動テストが可能です。
+   This mode allows for automated testing of debate scenarios against expected outcomes.
 
-   1. **テスト計画JSONファイルを作成:**
-      (`run_structured_tests_v2_1`関数のドキュメント内の例の構造を参照)
-      `initial_thought`と`expected_outcome`を持つ`debate_test_cases`を定義します。
+   1. **Create a Test Plan JSON file:**
+      (See example structure within the `run_structured_tests_v2_1` function documentation)
+      It defines `debate_test_cases` with `initial_thought` and `expected_outcome`.
 
-   2. **実行:**
+   2. **Execute:**
       python thought_debate_council_game_v2_1_1.py --test-mode /path/to/your_test_plan.json
 
-   3. **出力を確認:** スクリプトは各テストケースのPASS/FAILをログに記録し、
-      テストされた各討論のエクスポート（CSVマップ、DOTグラフ）を保存します。
+   3. **Review Output:** The script will log PASS/FAIL for each test case and save
+      exports (CSV map, DOT graph) for each tested debate.
 
-**VI. 独自のPythonプロジェクトでライブラリとして使用:**
+**VI. Using as a Library in Your Own Python Projects:**
 
    from thought_debate_council_game_v2_1_1 import ThoughtDebateCouncilGame, OpenAIClient, DEFAULT_GAME_CONFIG_V2_1
 
-   # 1. LLMクライアントを初期化
-   my_api_key = os.getenv("MY_PROJECT_OPENAI_KEY") # キーを安全に管理
+   # 1. Initialize LLM Client
+   my_api_key = os.getenv("MY_PROJECT_OPENAI_KEY") # Manage your key securely
    llm_client = OpenAIClient(api_key=my_api_key)
 
-   # 2. 評議会ゲームを設定
+   # 2. Configure Council Game
    council_config = DEFAULT_GAME_CONFIG_V2_1.copy()
-   council_config["user_data_path_root"] = "./my_app_council_data" # ユーザーデータはアプリ相対で保存
+   council_config["user_data_path_root"] = "./my_app_council_data" # User data stored relative to your app
    
    council_game = ThoughtDebateCouncilGame(
        llm_client=llm_client,
@@ -92,25 +93,25 @@ from __future__ import annotations # 型ヒントの遅延評価を有効にす�
        config=council_config
    )
 
-   # 3. 対話 (例: 討論を開始して1ラウンド実行)
-   debate1 = council_game.start_new_debate("科学的発見におけるAIの役割")
+   # 3. Interact (example: start a debate and run one round)
+   debate1 = council_game.start_new_debate("AI's role in scientific discovery.")
    if debate1['status'] == 'active':
        debate1 = council_game.advance_debate_round(debate1['debate_id'])
    print(json.dumps(debate1, indent=2, default=str))
 
-**VII. 主な機能と設計 (v2.1.1):**
-    - ユーザー関連データ: 討論/ログはユーザー名ごとに保存。
-    - 永続的な状態: 進行中の討論はロード/セーブされ、結論が出た討論はアーカイブされる。
-    - 動的スコアリング: 思考の強度とコンセンサスが進化する。
-    - 議論FAISS: 個々の議論をメタデータと共に保存。
-    - LLM抽象化: `BaseLLMClient`インターフェース（OpenAIClient提供）。
-    - 設定可能: モデル、ペルソナ、しきい値、パスを辞書で設定。
-    - 埋め込みプロンプトライブラリ: 明確なLLM指示のため。
-    - パーソナリティドリフト: AIエージェントの温度のオプションの変動。
-    - 高度なアドバイザーと敵対的検証。
-    - データエクスポート: CSV/JSONLの議論マップ、Graphviz DOTの討論グラフ。
-    - 構造化テスト: JSONプランによる自動テスト。
-    - 自己完結型: 一般的なライブラリ依存関係を持つ単一のPythonファイル。
+**VII. Key Features & Design (v2.1.1):**
+    - User-Associated Data: Debates/logs stored per username.
+    - Persistent State: Active debates loaded/saved; concluded debates archived.
+    - Dynamic Scoring: Thought strength and consensus evolve.
+    - Argument FAISS: Stores individual arguments with metadata.
+    - LLM Abstraction: `BaseLLMClient` interface (OpenAIClient provided).
+    - Configurable: Models, personas, thresholds, paths via dictionary.
+    - Embedded Prompt Library: For clear LLM instructions.
+    - Personality Drift: Optional temperature variations for AI agents.
+    - Advanced Advisors & Adversarial Validation.
+    - Data Export: CSV/JSONL argument maps, Graphviz DOT debate graphs.
+    - Structured Testing: Automated tests via JSON plans.
+    - Self-Contained: Single Python file with common library dependencies.
 ----------------------------------------------------------------------------------------------------
 """
 
@@ -131,7 +132,7 @@ import random
 import csv
 import statistics # IMPORTED
 
-# --- 依存関係のチェックとインポート ---
+# --- Dependency Checks & Imports ---
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
@@ -156,17 +157,17 @@ try:
 except ImportError:
     TENACITY_AVAILABLE = False
     def retry_llm_call(func): return func # type: ignore
-    logging.getLogger("ThoughtDebateCouncilGameV2.1.1").warning("Tenacityライブラリが見つかりません。LLM呼び出しのリトライロジックは無効になります。")
+    logging.getLogger("ThoughtDebateCouncilGameV2.1.1").warning("Tenacity library not found. LLM call retry logic disabled.")
 
 try:
-    import graphviz # .dotエクスポートのためのオプション
+    import graphviz # Optional for .dot export
     GRAPHVIZ_AVAILABLE = True
 except ImportError:
     GRAPHVIZ_AVAILABLE = False
-    logging.getLogger("ThoughtDebateCouncilGameV2.1.1").info("Graphvizライブラリが見つかりません。DOTファイルのエクスポートは無効になります。")
+    logging.getLogger("ThoughtDebateCouncilGameV2.1.1").info("Graphviz library not found. DOT file export will be disabled.")
 
 
-# --- ロガーのセットアップ ---
+# --- Logger Setup ---
 council_logger = logging.getLogger("ThoughtDebateCouncilGameV2.1.1")
 if not council_logger.handlers:
     _handler = logging.StreamHandler(sys.stdout)
@@ -176,7 +177,7 @@ if not council_logger.handlers:
     council_logger.setLevel(os.getenv("COUNCIL_GAME_LOG_LEVEL", "INFO").upper())
 
 
-# --- 設定と定数 ---
+# --- Configuration & Constants ---
 DEFAULT_GAME_CONFIG_V2_1 = {
     "default_llm_model": "gpt-4o-mini",
     "embedding_model_for_faiss": "text-embedding-3-small",
@@ -187,18 +188,18 @@ DEFAULT_GAME_CONFIG_V2_1 = {
     "log_to_jsonl": True,
     "jsonl_log_filename": "council_game_events.jsonl",
     "debate_agents": {
-        "pro": {"persona": "先見の明ある支持者", "temperature": 0.72, "max_tokens": 350},
-        "con": {"persona": "現実的な懐疑論者", "temperature": 0.68, "max_tokens": 350},
-        "neutral_evaluator": {"persona": "首席裁定官", "temperature": 0.3, "max_tokens": 450},
-        "argument_recombiner": {"persona": "創造的統合者（記憶）", "temperature": 0.6, "max_tokens": 350},
-        "adversarial_validator": {"persona": "懐疑的なレッドチーム", "temperature": 0.7, "max_tokens": 400}
+        "pro": {"persona": "Visionary Advocate", "temperature": 0.72, "max_tokens": 350},
+        "con": {"persona": "Pragmatic Skeptic", "temperature": 0.68, "max_tokens": 350},
+        "neutral_evaluator": {"persona": "Chief Adjudicator", "temperature": 0.3, "max_tokens": 450},
+        "argument_recombiner": {"persona": "Creative Synthesist (Memory)", "temperature": 0.6, "max_tokens": 350},
+        "adversarial_validator": {"persona": "Skeptical Red Teamer", "temperature": 0.7, "max_tokens": 400}
     },
     "advisor_personas": {
-        "synthesis": {"persona":"全体的インテグレーター", "temperature":0.55, "max_tokens":400},
-        "ethics": {"persona":"倫理の羅針盤", "temperature":0.4, "max_tokens":350},
-        "impact": {"persona":"先見の明あるストラテジスト", "temperature":0.5, "max_tokens":350},
-        "fallacy": {"persona":"論理の番人", "temperature":0.3, "max_tokens":300},
-        "meta_observer": {"persona":"プロセス監査官", "temperature":0.3, "max_tokens":300}
+        "synthesis": {"persona":"Holistic Integrator", "temperature":0.55, "max_tokens":400},
+        "ethics": {"persona":"Moral Compass", "temperature":0.4, "max_tokens":350},
+        "impact": {"persona":"Foresight Strategist", "temperature":0.5, "max_tokens":350},
+        "fallacy": {"persona":"Logic Warden", "temperature":0.3, "max_tokens":300},
+        "meta_observer": {"persona":"Process Auditor", "temperature":0.3, "max_tokens":300}
     },
     "initial_thought_score": 50.0,
     "persuasiveness_score_impact_factor": 0.1,
@@ -211,72 +212,72 @@ DEFAULT_GAME_CONFIG_V2_1 = {
     "max_active_debates_in_memory": 20
 }
 
-# --- 埋め込みミニプロンプトライブラリ ---
+# --- Embedded Mini-Prompt Library ---
 PROMPT_TEMPLATES = {
     "generate_argument": """
-あなたは討論のラウンド{{round_num}}における「{{persona}}」というペルソナを持つAIエージェントです。
-討論されている元の思考は次のとおりです：「{{original_thought}}」
-あなたの側（{{agent_type.upper()}}）の既存の議論（もしあれば、最新のものから順に）：
+You are an AI agent with persona '{{persona}}' in round {{round_num}} of a debate.
+The original thought being debated is: "{{original_thought}}"
+Existing arguments for your side ({{agent_type.upper()}}), if any (most recent first):
 {{existing_args_summary}}
 
-あなたのタスクは、新しく、簡潔で、説得力のある{{agent_type.upper()}}の議論を生成することです。
-明確な点に焦点を当てるか、以前の議論を批判的に発展させてください。強力な論理と新規性を目指してください。
-厳密にJSON形式で、これらの正確なキーで出力してください：
+Your task is to generate a NEW, concise, and persuasive {{agent_type.upper()}} argument.
+Focus on a distinct point or critically build upon prior arguments. Aim for strong reasoning and novelty.
+Output strictly in JSON format with these exact keys:
 {
-  "argument_text": "[あなたの簡潔な議論、最大2-3文の洞察に富んだ文。ポイントの繰り返しは避けてください。]",
-  "persuasiveness_score": "[浮動小数点数：この特定の議論が新規性と影響を考慮してどれだけ説得力があるか、0.1から1.0の自己評価スコア]",
-  "keywords": ["[あなたの", "議論から", "3-5個の", "主要な", "用語のリスト"]
+  "argument_text": "[Your concise argument, max 2-3 insightful sentences. Avoid repeating points.]",
+  "persuasiveness_score": "[Float: Your self-assessed score from 0.1 to 1.0 on how persuasive THIS specific argument is, considering novelty and impact]",
+  "keywords": ["[list", "of", "3-5", "key", "terms", "from", "your", "argument"]
 }""",
     "evaluate_round": """
-あなたは「{{persona}}」です。討論の議題は：「{{original_thought}}」
-現在の思考の強度：{{thought_strength:.1f}}/100。コンセンサスレベル：{{consensus_level:.2f}}。
-これはラウンド{{current_round}}です。
-このラウンドの新しい賛成意見：
+You are the '{{persona}}'. The debate is on: "{{original_thought}}"
+Current Thought Strength: {{thought_strength:.1f}}/100. Consensus Level: {{consensus_level:.2f}}.
+This is Round {{current_round}}.
+New PRO arguments this round:
 {{pro_args_summary_this_round}}
-このラウンドの新しい反対意見：
+New CON arguments this round:
 {{con_args_summary_this_round}}
 
-これらの新しい議論と計算されたスコア（新強度：{{new_thought_strength:.1f}}/100、新コンセンサス：{{new_consensus_level:.2f}}）に基づいて、JSON形式で評価を提供してください：
+Based on these new arguments and the calculated scores (New Strength: {{new_thought_strength:.1f}}/100, New Consensus: {{new_consensus_level:.2f}}), provide your evaluation in JSON format:
 {
-  "round_summary_text": "[このラウンドの主要な議論とその全体的な影響の簡単な要約。どちらかの側が明らかに説得力があった場合はその理由を述べてください。]",
+  "round_summary_text": "[Brief summary of this round's key arguments and overall impact. Mention if one side was clearly more persuasive and why.]",
   "updated_thought_strength_score": {{new_thought_strength:.2f}},
   "updated_consensus_level": {{new_consensus_level:.2f}},
-  "recommend_next_action": ["討論を続ける", "結論を出す - 思考を推進", "結論を出す - 思考を棄却", "アドバイザーに助言を求める：倫理", "アドバイザーに助言を求める：影響"],
-  "reason_for_recommendation": "[現在の強度/コンセンサスと議論の質に基づいた、推薦の簡単な根拠。]"
+  "recommend_next_action": ["Continue Debate", "Conclude - Promote Thought", "Conclude - Reject Thought", "Seek Advisor Input: Ethics", "Seek Advisor Input: Impact"],
+  "reason_for_recommendation": "[Your brief rationale for the recommendation based on current strength/consensus and argument quality.]"
 }""",
     "advisor_synthesis": """
-あなたは「{{persona}}」です。元の思考とすべての賛成/反対の議論をレビューして、洗練されたステートメントを統合するか、中心的な緊張点を特定してください。
-元の思考：「{{original_thought}}」
-すべての賛成意見の要約：{{all_pro_args_summary}}
-すべての反対意見の要約：{{all_con_args_summary}}
-JSONを出力：{"final_synthesized_statement": "...", "synthesis_confidence": 0.0-1.0, "key_unresolved_tensions": ["...", "..."]}""",
+You are the '{{persona}}'. Review the original thought and all PRO/CON arguments to synthesize a refined statement or identify core tension.
+Original Thought: "{{original_thought}}"
+All PRO Arguments Summary: {{all_pro_args_summary}}
+All CON Arguments Summary: {{all_con_args_summary}}
+Output JSON: {"final_synthesized_statement": "...", "synthesis_confidence": 0.0-1.0, "key_unresolved_tensions": ["...", "..."]}""",
     "advisor_ethics": """
-あなたは「{{persona}}」です。思考（またはその統合）の倫理的意味合いを分析してください：「{{text_for_analysis}}」
-JSONを出力：{"key_ethical_concerns": ["...", "..."], "overall_ethical_rating": 0.0-1.0, "mitigation_suggestions": ["...", "..."]}""",
+You are the '{{persona}}'. Analyze ethical implications of the thought (or its synthesis): "{{text_for_analysis}}"
+Output JSON: {"key_ethical_concerns": ["...", "..."], "overall_ethical_rating": 0.0-1.0, "mitigation_suggestions": ["...", "..."]}""",
     "advisor_impact": """
-あなたは「{{persona}}」です。思考の潜在的な実世界への影響（肯定的/否定的、短期的/長期的）を評価してください：「{{text_for_analysis}}」
-JSONを出力：{"potential_positive_impacts": ["...", "..."], "potential_negative_risks": ["...", "..."], "overall_impact_assessment_score": -1.0 to 1.0, "time_horizon_of_impact": "短期/中期/長期"}""",
+You are the '{{persona}}'. Assess potential real-world impacts (positive/negative, short/long-term) of the thought: "{{text_for_analysis}}"
+Output JSON: {"potential_positive_impacts": ["...", "..."], "potential_negative_risks": ["...", "..."], "overall_impact_assessment_score": -1.0 to 1.0, "time_horizon_of_impact": "Short-term/Medium-term/Long-term"}""",
     "adversarial_validator": """
-あなたは「{{persona}}」です。以下の思考は評議会によって暫定的に推進されました。あなたのタスクは、それを批判的に再評価し、悪魔の代弁者となって見過ごされた欠陥、矛盾、または否定的な意味合いを見つけることです。
-推進された思考：「{{thought_to_validate}}」
-支持する統合（もしあれば）：「{{synthesis_summary}}」
-JSONを出力：{"validation_status": ["有効と確認", "軽微な懸念あり", "重大な欠陥あり"], "identified_issues_or_counterarguments": ["...", "..."], "confidence_in_validation": 0.0-1.0}""",
+You are the '{{persona}}'. The following thought has been provisionally promoted by the council. Your task is to critically re-evaluate it, playing devil's advocate to find overlooked flaws, contradictions, or negative implications.
+Promoted Thought: "{{thought_to_validate}}"
+Supporting Synthesis (if available): "{{synthesis_summary}}"
+Output JSON: {"validation_status": ["Confirmed Valid", "Minor Concerns Found", "Significant Flaws Found"], "identified_issues_or_counterarguments": ["...", "..."], "confidence_in_validation": 0.0-1.0}""",
     "debate_digest": """
-思考に関する討論全体を要約してください：「{{original_thought}}」
-最終ステータス：{{final_status}}、最終強度スコア：{{final_strength_score:.1f}}
-主要な賛成意見：{{top_pro_args_summary}}
-主要な反対意見：{{top_con_args_summary}}
-主要なアドバイザーの洞察（統合/倫理/影響）：{{advisor_insights_summary}}
-レポートに適したMarkdown形式で簡潔なダイジェストを出力してください：
-- 全体概要: ...
-- 最も強力な賛成意見: ...
-- 最も強力な反対意見: ...
-- 主要なアドバイザーの結論: ...
-- 評議会の最終評決: ...
+Summarize the entire debate on the thought: "{{original_thought}}"
+Final Status: {{final_status}}, Final Strength Score: {{final_strength_score:.1f}}
+Key Pro Arguments: {{top_pro_args_summary}}
+Key Con Arguments: {{top_con_args_summary}}
+Key Advisor Insights (Synthesis/Ethics/Impact): {{advisor_insights_summary}}
+Output a concise digest in Markdown format suitable for a report:
+- Overall Summary: ...
+- Strongest Pro Point(s): ...
+- Strongest Con Point(s): ...
+- Key Advisor Takeaway(s): ...
+- Final Council Verdict: ...
 """
 }
 
-# --- LLMクライアントの抽象化 ---
+# --- LLM Client Abstraction ---
 class BaseLLMClient(ABC):
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         self.api_key = api_key
@@ -290,13 +291,13 @@ class BaseLLMClient(ABC):
 class OpenAIClient(BaseLLMClient):
     def __init__(self, api_key: str, default_model: str = DEFAULT_GAME_CONFIG_V2_1["default_llm_model"]):
         super().__init__(api_key, default_model)
-        if not OPENAI_AVAILABLE or OpenAI is None: council_logger.error("OpenAIライブラリが利用できません。"); raise ImportError("OpenAIライブラリが必要です。")
+        if not OPENAI_AVAILABLE or OpenAI is None: council_logger.error("OpenAI library not available."); raise ImportError("OpenAI library required.")
         try: 
             self.client = OpenAI(api_key=self.api_key)
             self.is_ready = True
-            council_logger.info(f"OpenAIClientがデフォルトモデルで初期化されました: {self.default_model}")
+            council_logger.info(f"OpenAIClient initialized with default model: {self.default_model}")
         except Exception as e: 
-            council_logger.error(f"OpenAIクライアントの初期化に失敗しました: {e}", exc_info=True)
+            council_logger.error(f"Failed to init OpenAI client: {e}", exc_info=True)
             self.is_ready = False
 
     @retry_llm_call # type: ignore
@@ -308,13 +309,13 @@ class OpenAIClient(BaseLLMClient):
             if max_tokens: api_params["max_tokens"] = max_tokens
             if json_mode and any(m_name in actual_model for m_name in ["gpt-4-turbo", "gpt-3.5-turbo-1106", "gpt-4o", "gpt-4o-mini", "gpt-4-0125-preview", "gpt-3.5-turbo-0125"]):
                  api_params["response_format"] = {"type": "json_object"}
-            elif json_mode: council_logger.debug(f"JSONモードが要求されましたが、モデル{actual_model}はAPIフラグ経由でサポートしていないか、既知のリストにありません。標準リクエスト。")
+            elif json_mode: council_logger.debug(f"JSON mode requested but model {actual_model} may not support it via API flag or is not in known list. Standard request.")
             
             response = self.client.chat.completions.create(**api_params) # type: ignore
             content = response.choices[0].message.content
             return content.strip() if content else None
         except BadRequestError as e_br: council_logger.error(f"OpenAI BadRequestError: {e_br}", exc_info=False); return f"[LLM_BAD_REQUEST_ERROR: {str(e_br)[:100]}]"
-        except Exception as e: council_logger.error(f"OpenAI get_chat_completionエラー: {e}", exc_info=True); return f"[LLM_API_ERROR: {type(e).__name__}]"
+        except Exception as e: council_logger.error(f"OpenAI get_chat_completion error: {e}", exc_info=True); return f"[LLM_API_ERROR: {type(e).__name__}]"
 
     @retry_llm_call # type: ignore
     def get_embedding(self, text: str, model: Optional[str] = None, dim: Optional[int] = None) -> Optional[List[float]]:
@@ -324,7 +325,7 @@ class OpenAIClient(BaseLLMClient):
         try:
             actual_model = model or DEFAULT_GAME_CONFIG_V2_1["embedding_model_for_faiss"]
             api_params: Dict[str,Any] = {"input":text, "model":actual_model}
-            # v3埋め込みモデルの場合のみ次元を渡す
+            # Only pass dimensions if model supports it (v3 embedding models)
             if "text-embedding-3" in actual_model:
                 api_params["dimensions"] = target_dim
             
@@ -332,15 +333,15 @@ class OpenAIClient(BaseLLMClient):
             embedding = response.data[0].embedding
 
             if len(embedding) != target_dim and "text-embedding-3" not in actual_model :
-                 council_logger.warning(f"非v3モデル{actual_model}の埋め込み次元が不一致！期待値{target_dim}、取得値{len(embedding)}。これは予期せぬ事態です。")
-            elif "text-embedding-3" in actual_model and len(embedding) != target_dim: # v3モデルはより短い次元を要求可能
-                 council_logger.warning(f"v3モデル{actual_model}の埋め込み次元が不一致！APIは{target_dim}を要求したにもかかわらず{len(embedding)}を返しました。切り捨て/パディングします。")
+                 council_logger.warning(f"Embedding dim mismatch for non-v3 model {actual_model}! Expected {target_dim}, got {len(embedding)}. This is unexpected.")
+            elif "text-embedding-3" in actual_model and len(embedding) != target_dim: # v3 models allow requesting shorter dimensions
+                 council_logger.warning(f"V3 Embedding dim mismatch for {actual_model}! API returned {len(embedding)} despite requesting {target_dim}. Truncating/Padding.")
                  if len(embedding) > target_dim: embedding = embedding[:target_dim]
                  else: embedding.extend([0.0] * (target_dim - len(embedding)))
             return embedding
-        except Exception as e: council_logger.error(f"OpenAI get_embeddingエラー: {e}", exc_info=True); return None
+        except Exception as e: council_logger.error(f"OpenAI get_embedding error: {e}", exc_info=True); return None
 
-# --- メイン評議会ゲームクラス ---
+# --- Main Council Game Class ---
 class ThoughtDebateCouncilGame:
     def __init__(self,
                  llm_client: BaseLLMClient,
@@ -357,7 +358,7 @@ class ThoughtDebateCouncilGame:
         
         self.llm_client = llm_client
         if not self.llm_client.is_ready:
-            msg = "ThoughtDebateCouncilGameに提供されたLLMクライアントが準備できていません。"
+            msg = "LLM Client provided to ThoughtDebateCouncilGame is not ready."
             self.logger.critical(msg)
             raise ValueError(msg)
 
@@ -384,10 +385,10 @@ class ThoughtDebateCouncilGame:
         self.active_debates: Dict[str, Dict[str, Any]] = self._load_all_active_debates()
         
         self.logger.info(
-            f"ThoughtDebateCouncilGame v2.1.1がユーザー'{self.username}'のために初期化されました。 "
-            f"データパス: {self.user_data_base_path}。 "
-            f"{len(self.active_debates)}件の進行中の討論をロードしました。 "
-            f"議論FAISSインデックスには{self.arguments_faiss_index.ntotal if self.arguments_faiss_index and FAISS_AVAILABLE else 'N/A'}個のベクトルがあります。"
+            f"ThoughtDebateCouncilGame v2.1.1 initialized for user '{self.username}'. "
+            f"Data path: {self.user_data_base_path}. "
+            f"Loaded {len(self.active_debates)} active debates. "
+            f"Arguments FAISS index has {self.arguments_faiss_index.ntotal if self.arguments_faiss_index and FAISS_AVAILABLE else 'N/A'} vectors."
         )
 
         if __name__ == "__main__" or self.config.get("display_rules_on_init", False):
@@ -410,25 +411,590 @@ class ThoughtDebateCouncilGame:
     
     def _display_rules(self):
         self.logger.info("\n" + "*"*70)
-        self.logger.info("👑 思考討論評議会ゲームへようこそ！ (v2.1.1) 👑".center(70))
+        self.logger.info("👑 WELCOME TO THE THOUGHT DEBATE COUNCIL GAME! (v2.1.1) 👑".center(70))
         self.logger.info("*"*70)
-        self.logger.info("目的: 「思考」を提出し、スコアリングと記憶を備えた複数ラウンドのAI討論でどのように評価されるかを確認します。")
-        self.logger.info("プロセス:")
-        self.logger.info("  1. 討論の開始/ロード: 最初の思考を提供するか、既存のものを続行します。")
-        self.logger.info("  2. AIエージェントの参加: 賛成および反対のAIエージェントが、FAISSから過去の議論を使用して議論を生成します。")
-        self.logger.info("  3. スコアリング: 中立の評価者が議論をスコアリングし、思考の強度とコンセンサスを更新します。")
-        self.logger.info("  4. 複数ラウンド: 討論は進行し、議論は進化します。")
-        self.logger.info("  5. アドバイザー: AIアドバイザー（統合、倫理、影響）が洞察を提供します。")
-        self.logger.info("  6. 検証（オプション）: 敵対的エージェントが推進された思考に異議を唱えることがあります。")
-        self.logger.info("  7. 結論とダイジェスト: 評議会が結果を決定し、要約が生成されます。")
-        self.logger.info("  8. エクスポート: 討論はCSV、JSONL、またはGraphviz DOTファイルとしてエクスポートできます。")
-        self.logger.info("知的なスパーリングを始めましょう！")
+        self.logger.info("Objective: Submit a 'thought' and see how it fares in a multi-round AI debate with scoring and memory.")
+        self.logger.info("Process:")
+        self.logger.info("  1. Start/Load Debate: Provide your initial thought or continue an existing one.")
+        self.logger.info("  2. AI Agents Engage: PRO and CON AI agents generate arguments, potentially using past arguments from FAISS.")
+        self.logger.info("  3. Scoring: A NEUTRAL evaluator scores arguments and updates the thought's strength & consensus.")
+        self.logger.info("  4. Multiple Rounds: The debate proceeds, arguments evolve.")
+        self.logger.info("  5. Advisors: AI advisors (Synthesis, Ethics, Impact) provide insights.")
+        self.logger.info("  6. Validation (Optional): An adversarial agent may challenge promoted thoughts.")
+        self.logger.info("  7. Conclusion & Digest: The council determines outcome; a summary is generated.")
+        self.logger.info("  8. Export: Debates can be exported as CSV, JSONL, or Graphviz DOT files.") # Changed JSON to JSONL
+        self.logger.info("Let the intellectual sparring begin!")
         self.logger.info("*"*70 + "\n")
 
-    # ... (The rest of the class methods would be here, with user-facing strings translated)
-    # ... (For brevity, only the translated parts are shown above)
+    def _load_faiss_index(self, index_file_path: Path, dimension: int) -> Optional[Any]:
+        if not FAISS_AVAILABLE:
+            self.logger.warning("FAISS library not available, FAISS indexing disabled for this session.")
+            return None
+        if index_file_path.exists():
+            try:
+                self.logger.info(f"Loading FAISS index from {index_file_path}")
+                idx = faiss.read_index(str(index_file_path)) # type: ignore
+                if idx.d != dimension:
+                    self.logger.warning(f"FAISS index dimension mismatch (found {idx.d}, expected {dimension}) at {index_file_path}. Re-initializing empty index.")
+                    return faiss.IndexFlatL2(dimension) # type: ignore
+                return idx
+            except Exception as e:
+                self.logger.error(f"Error loading FAISS index from {index_file_path}: {e}. Creating new.", exc_info=True)
+        self.logger.info(f"FAISS index not found at {index_file_path}. Creating new (Dim: {dimension}).")
+        return faiss.IndexFlatL2(dimension) if dimension > 0 and FAISS_AVAILABLE else None # type: ignore
 
-# --- The rest of the file is omitted for brevity, but would need translation of user-facing strings in the CLI part ---
+    def _load_pickle_metadata(self, metadata_file_path: Path) -> List[Dict[str, Any]]:
+        if metadata_file_path.exists():
+            try:
+                with open(metadata_file_path, "rb") as f:
+                    data = pickle.load(f)
+                self.logger.info(f"Loaded {len(data)} FAISS metadata entries from {metadata_file_path}")
+                return data
+            except Exception as e:
+                self.logger.error(f"Error loading FAISS metadata from {metadata_file_path}: {e}. Starting fresh.", exc_info=True)
+        return []
+
+    def _save_faiss_index(self):
+        if self.arguments_faiss_index and FAISS_AVAILABLE:
+            try:
+                faiss.write_index(self.arguments_faiss_index, str(self.faiss_index_path)) # type: ignore
+                self.logger.debug(f"Arguments FAISS index saved to {self.faiss_index_path}")
+            except Exception as e:
+                self.logger.error(f"Error saving arguments FAISS index to {self.faiss_index_path}: {e}", exc_info=True)
+
+    def _save_pickle_metadata(self):
+        try:
+            with open(self.faiss_metadata_path, "wb") as f:
+                pickle.dump(self.arguments_faiss_metadata, f)
+            self.logger.debug(f"Arguments FAISS metadata saved to {self.faiss_metadata_path}")
+        except Exception as e:
+            self.logger.error(f"Error saving arguments FAISS metadata to {self.faiss_metadata_path}: {e}", exc_info=True)
+
+    def _load_debate_state_from_file(self, debate_id: str) -> Optional[Dict[str, Any]]:
+        debate_file_active = self.debates_path / f"{debate_id}.json"
+        debate_file_archived = self.archive_path / f"{debate_id}.json"
+        file_to_try: Optional[Path] = None
+
+        if debate_file_active.exists():
+            file_to_try = debate_file_active
+        elif debate_file_archived.exists():
+            file_to_try = debate_file_archived
+            self.logger.info(f"Debate '{debate_id}' found in archive path.")
+
+        if not file_to_try:
+            return None
+
+        try:
+            with open(file_to_try, "r", encoding="utf-8") as f:
+                state = json.load(f)
+
+            checksum_in_file = state.pop("_checksum", None)
+            calculated_checksum = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
+
+            if checksum_in_file and checksum_in_file != calculated_checksum:
+                self.logger.warning(f"CHECKSUM MISMATCH for debate '{debate_id}' loaded from {file_to_try}. Data may be corrupted!")
+
+            state["_checksum"] = checksum_in_file # Add it back for consistency, even if None or mismatched for now
+
+            if file_to_try == debate_file_archived and state.get("status") == "active":
+                self.logger.info(f"Debate '{debate_id}' is active but was in archive. Moving to active debates path.")
+                self.debates_path.mkdir(parents=True, exist_ok=True)
+                try: file_to_try.rename(self.debates_path / f"{debate_id}.json")
+                except Exception as e_move: self.logger.error(f"Could not move debate '{debate_id}' from archive to active: {e_move}")
+
+            # self.active_debates[debate_id] = state # Don't modify self.active_debates here, return instead
+            return state
+        except Exception as e:
+            self.logger.error(f"Error loading and processing debate state from file '{file_to_try}': {e}", exc_info=True)
+        return None
+
+
+    def _load_all_active_debates(self) -> Dict[str, Dict[str,Any]]:
+        active_loaded_from_disk: Dict[str, Dict[str,Any]] = {}
+        loaded_count = 0
+        max_to_load = self.config.get("max_active_debates_in_memory", 50)
+
+        if self.debates_path.exists():
+            all_json_files = sorted(list(self.debates_path.glob("*.json")), key=lambda p: p.stat().st_mtime, reverse=True)
+            for debate_file in all_json_files:
+                if loaded_count >= max_to_load:
+                    self.logger.warning(f"Reached max_active_debates_in_memory ({max_to_load}). Some active debates on disk not loaded into memory at init.")
+                    break
+                debate_id_from_filename = debate_file.stem
+                # Use _load_debate_state_from_file to get the state with checksum verification
+                state = self._load_debate_state_from_file(debate_id_from_filename) # This will use the active path
+
+                if state and state.get("status") == "active":
+                    active_loaded_from_disk[debate_id_from_filename] = state
+                    loaded_count +=1
+                # _load_debate_state_from_file handles logging of checksum issues or if it moves from archive
+        return active_loaded_from_disk
+
+    def _save_debate_state(self, debate_id: str):
+        if debate_id in self.active_debates:
+            state_to_save = self.active_debates[debate_id].copy()
+            # Ensure datetime objects are strings and remove old checksum before recalculating
+            state_for_checksum = {}
+            for key, value in state_to_save.items():
+                if key == "_checksum": continue # Exclude old checksum from new calculation
+                state_for_checksum[key] = str(value) if isinstance(value, datetime) else value
+
+            state_to_save["_checksum"] = hashlib.sha256(json.dumps(state_for_checksum, sort_keys=True).encode()).hexdigest()
+
+            debate_file = self.debates_path / f"{debate_id}.json"
+            try:
+                with open(debate_file, "w", encoding="utf-8") as f: json.dump(state_to_save, f, indent=2, default=str) # Use default=str for any other non-serializable
+                self.logger.info(f"Debate '{debate_id}' state saved (Checksum: ...{state_to_save['_checksum'][-6:]}).")
+            except Exception as e: self.logger.error(f"Error saving debate state for '{debate_id}': {e}", exc_info=True)
+
+
+    def _archive_debate_state(self, debate_id: str):
+        if debate_id in self.active_debates: # Check if it's in memory to archive
+            state_to_archive = self.active_debates.pop(debate_id) # Remove from active memory
+            archive_target_path = self.archive_path / f"{debate_id}.json"
+            source_path_if_exists = self.debates_path / f"{debate_id}.json" # Path if it was saved to active dir
+
+            try:
+                # Ensure the state is written to archive path, even if it was only in memory
+                with open(archive_target_path, "w", encoding="utf-8") as f:
+                    json.dump(state_to_archive, f, indent=2, default=str)
+                self.logger.info(f"Archived debate '{debate_id}' to {archive_target_path}")
+                if source_path_if_exists.exists(): # If it was also on disk in active, remove it
+                    source_path_if_exists.unlink()
+            except Exception as e:
+                self.logger.error(f"Error during archiving debate '{debate_id}': {e}")
+                self.active_debates[debate_id] = state_to_archive # Put back in active if archiving failed
+
+
+    def _store_argument_in_faiss(self, debate_id: str, argument_id: str, argument_text: str, argument_type: str, round_num: int, persuasiveness: float):
+        if not self.arguments_faiss_index or not NUMPY_AVAILABLE or not self.embedding_fn: self.logger.warning("Cannot store argument: FAISS/NumPy/EmbeddingFn unavailable."); return
+
+        # More contextual text for embedding arguments to better capture their nuance within the debate
+        original_thought_text = self.active_debates.get(debate_id, {}).get('original_thought_text', 'Unknown Topic')
+        text_to_embed = (f"Debate on: \"{original_thought_text[:100]}...\". "
+                         f"Argument Type: {argument_type.upper()}. Round: {round_num}. "
+                         f"Persuasiveness: {persuasiveness:.2f}. Statement: {argument_text}")
+
+        vector = self.embedding_fn(text_to_embed, self.embedding_dim)
+
+        if vector and NUMPY_AVAILABLE:
+            try:
+                vec_np = np.array(vector, dtype="float32").reshape(1, -1)
+                faiss_internal_id = self.arguments_faiss_index.ntotal # This is the ID it *will* get
+                self.arguments_faiss_index.add(vec_np)
+                self.arguments_faiss_metadata.append({
+                    "argument_id": argument_id, "debate_id": debate_id, "round": round_num,
+                    "type": argument_type, "text": argument_text, # Store full argument text
+                    "persuasiveness": persuasiveness, "faiss_internal_id": faiss_internal_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                self._save_faiss_index()
+                self._save_pickle_metadata()
+                self.logger.info(f"Stored argument '{argument_id}' ({argument_type}, FAISS ID: {faiss_internal_id}) for debate '{debate_id}'.")
+            except Exception as e: self.logger.error(f"Error storing argument '{argument_id}': {e}", exc_info=True)
+        else: self.logger.warning(f"Could not embed argument '{argument_id}'. Not stored in FAISS.")
+
+    def _search_faiss_for_similar_arguments(self, query_text: str, argument_type_filter: Optional[str] = None, k: int = 3, debate_id_context: Optional[str]=None) -> List[Dict[str, Any]]:
+        if not self.arguments_faiss_index or not self.embedding_fn or not NUMPY_AVAILABLE or self.arguments_faiss_index.ntotal == 0: return []
+
+        # Embed the query in context of the debate topic for better relevance
+        search_query_context = query_text
+        if debate_id_context and debate_id_context in self.active_debates:
+            search_query_context = f"In the context of the debate on \"{self.active_debates[debate_id_context]['original_thought_text'][:100]}...\", consider arguments related to: {query_text}"
+
+        query_vector_list = self.embedding_fn(search_query_context, self.embedding_dim)
+        if not query_vector_list: return []
+
+        query_vector_np = np.array(query_vector_list, dtype="float32").reshape(1,-1)
+
+        # Fetch more results initially to allow for filtering by type and potentially debate_id
+        fetch_k = k * 5 if argument_type_filter else k * 2
+        fetch_k = min(fetch_k, self.arguments_faiss_index.ntotal)
+        if fetch_k == 0: return []
+
+        distances, indices = self.arguments_faiss_index.search(query_vector_np, k=fetch_k)
+
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if 0 <= idx < len(self.arguments_faiss_metadata):
+                meta = self.arguments_faiss_metadata[idx].copy() # Work with a copy
+                # Optional: Exclude arguments from the current debate if looking for truly "past" inspiration
+                # if debate_id_context and meta.get("debate_id") == debate_id_context:
+                #    continue
+                if argument_type_filter and meta.get("type") != argument_type_filter:
+                    continue
+                meta["similarity_score"] = 1.0 - distances[0][i] # Higher is better
+                results.append(meta)
+                if len(results) >= k: break
+        return sorted(results, key=lambda x: x["similarity_score"], reverse=True)
+
+
+    def _render_prompt(self, template_key: str, **kwargs) -> str: # Identical
+        template = PROMPT_TEMPLATES.get(template_key)
+        if not template: self.logger.error(f"Prompt template '{template_key}' not found!"); return "Error: Prompt template missing."
+        rendered_prompt = template;
+        for key, value in kwargs.items(): rendered_prompt = rendered_prompt.replace(f"{{{{{key}}}}}", str(value))
+        return rendered_prompt
+
+    def _llm_generate_argument(self, debate_id: str, existing_args_summary: str, agent_cfg: Dict, agent_type: str, round_num: int, use_memory_recombiner: bool = False) -> Dict[str, Any]:
+        temp_to_use = agent_cfg['temperature']
+        if self.config.get("enable_personality_drift", False):
+            drift_min, drift_max = self.config.get("temperature_drift_range", (-0.05, 0.05))
+            temp_to_use = round(max(0.1, min(1.0, temp_to_use + random.uniform(drift_min, drift_max))), 2)
+
+        recombined_prompt_injection = ""
+        if use_memory_recombiner and round_num > 0:
+            original_thought = self.active_debates[debate_id]["original_thought_text"]
+            similar_args = self._search_faiss_for_similar_arguments(original_thought, argument_type_filter=agent_type, k=self.config.get("faiss_search_top_k_for_recombiner",3), debate_id_context=debate_id)
+            if similar_args:
+                recombined_prompt_injection = "\n\nConsider these similar past arguments from memory (your side) when forming your new point:\n" + \
+                                              "\n".join([f"  - (Past Persuasiveness: {s.get('persuasiveness',0):.2f}) {s.get('text','N/A')[:100]}..." for s in similar_args])
+
+        prompt = self._render_prompt("generate_argument", persona=agent_cfg['persona'], round_num=round_num,
+                                     original_thought=self.active_debates[debate_id]["original_thought_text"],
+                                     existing_args_summary=(existing_args_summary + recombined_prompt_injection).strip(),
+                                     agent_type=agent_type)
+
+        raw_response = self.llm_client.get_chat_completion(messages=[{"role": "user", "content": prompt}],
+                                                           model=self.config["default_llm_model"], temperature=temp_to_use,
+                                                           max_tokens=agent_cfg.get('max_tokens'), json_mode=True)
+
+        if not raw_response or raw_response.startswith("[LLM_"):
+            self.logger.error(f"LLM failed for {agent_type} argument in debate {debate_id}: {raw_response}")
+            return {"argument_text": f"LLM failure: {raw_response}", "persuasiveness_score": 0.0, "keywords": ["error"]}
+        try:
+            parsed = json.loads(raw_response)
+            parsed["argument_text"] = str(parsed.get("argument_text", "Error: Missing argument text.")).strip()[:self.config.get("max_argument_length",2000)]
+            try: score = float(parsed.get("persuasiveness_score", 0.1)); parsed["persuasiveness_score"] = max(0.0, min(1.0, score))
+            except: parsed["persuasiveness_score"] = 0.1 # Default on conversion error
+            # Clean keywords: ensure list of strings, unique, lowercase, and limit count
+            keywords_raw = parsed.get("keywords", [])
+            if isinstance(keywords_raw, list):
+                parsed["keywords"] = list(set(str(kw).strip().lower() for kw in keywords_raw if isinstance(kw, str) and kw.strip()))[:5]
+            else: parsed["keywords"] = [] # Default to empty list if not a list
+            if not parsed["argument_text"]: parsed["argument_text"] = "Error: Empty LLM argument."
+            return parsed
+        except json.JSONDecodeError as e:
+            self.logger.error(f"JSON decode error for {agent_type} arg in debate {debate_id}: {e}. Raw: {raw_response[:200]}...");
+            return {"argument_text": f"JSON decode error: {raw_response[:100]}...", "persuasiveness_score": 0.0, "keywords": ["json_error"]}
+
+
+    def _llm_evaluate_round_and_score(self, debate_state: Dict[str, Any], pro_args_this_round: List[Dict], con_args_this_round: List[Dict]) -> Dict[str, Any]: # Signature corrected
+        eval_persona_cfg = self.config["debate_agents"]["neutral_evaluator"]
+        pro_texts_summary = "\n".join([f"  - '{arg.get('argument_text', '')[:self.config.get('max_argument_length_for_prompt',150)]}...' (Persuasiveness: {arg.get('persuasiveness_score',0):.2f})" for arg in pro_args_this_round])
+        con_texts_summary = "\n".join([f"  - '{arg.get('argument_text', '')[:self.config.get('max_argument_length_for_prompt',150)]}...' (Score: {arg.get('persuasiveness_score',0):.2f})" for arg in con_args_this_round])
+
+        # Calculate scores based on ALL arguments up to and including this round's
+        temp_debate_state_for_calc = debate_state.copy()
+        temp_debate_state_for_calc["pro_arguments_log"] = debate_state.get("pro_arguments_log", []) + pro_args_this_round
+        temp_debate_state_for_calc["con_arguments_log"] = debate_state.get("con_arguments_log", []) + con_args_this_round
+        new_overall_thought_strength, new_overall_consensus_level = self._calculate_current_debate_metrics(temp_debate_state_for_calc)
+
+        prompt = self._render_prompt("evaluate_round",
+            persona=eval_persona_cfg['persona'],
+            original_thought=debate_state['original_thought_text'][:300]+"...",
+            thought_strength=debate_state['thought_strength_score'], # Strength *before* this round's new args are fully integrated by Neutral Judge
+            consensus_level=debate_state['consensus_level'],       # Consensus *before* this round
+            current_round=debate_state['current_round'],
+            pro_args_summary_this_round=pro_texts_summary or "  No new PRO arguments this round.",
+            con_args_summary_this_round=con_texts_summary or "  No new CON arguments this round.",
+            new_thought_strength=new_overall_thought_strength, # Pass our calculated new scores
+            new_consensus_level=new_overall_consensus_level
+        )
+        # ... (rest of parsing logic from v2.1.1, using new_overall_thought_strength & new_overall_consensus_level)
+        raw_response = self.llm_client.get_chat_completion(messages=[{"role": "user", "content": prompt}], model=self.config["default_llm_model"], temperature=eval_persona_cfg['temperature'], max_tokens=eval_persona_cfg.get('max_tokens'), json_mode=True)
+        default_eval = {"round_summary_text": "Evaluation requires review due to LLM issue.", "updated_thought_strength_score": new_overall_thought_strength, "updated_consensus_level": new_overall_consensus_level, "recommend_next_action": "Seek Advisor Input: Ethics", "reason_for_recommendation":"LLM evaluation call failed."}
+        if not raw_response or raw_response.startswith("[LLM_"): self.logger.error(f"LLM evaluation failed: {raw_response}"); return default_eval
+        try:
+            parsed = json.loads(raw_response); parsed["updated_thought_strength_score"] = new_overall_thought_strength; parsed["updated_consensus_level"] = new_overall_consensus_level
+            parsed.setdefault("recommend_next_action", "Continue Debate"); parsed.setdefault("reason_for_recommendation", "Defaulting."); parsed.setdefault("round_summary_text", "Incomplete summary.")
+            return parsed
+        except json.JSONDecodeError as e: self.logger.error(f"JSON decode error for round evaluation: {e}. Raw: {raw_response[:200]}..."); default_eval["round_summary_text"] = f"JSON decode error in LLM eval: {raw_response[:100]}..."; return default_eval
+
+    def _run_advisors(self, debate_state: Dict[str, Any]) -> Dict[str, Any]: # Maintained
+        # ... (same as v2.1.1)
+        self.logger.info(f"Running advisors for debate '{debate_state['debate_id']}'...")
+        advisor_outputs = {}; text_for_advisors = debate_state.get("final_synthesized_statement", debate_state["original_thought_text"])
+        all_pro_args_summary = "; ".join([arg.get("argument_text","") for arg in debate_state.get("pro_arguments_log",[])])[:1000]
+        all_con_args_summary = "; ".join([arg.get("argument_text","") for arg in debate_state.get("con_arguments_log",[])])[:1000]
+        for advisor_key, advisor_cfg in self.config.get("advisor_personas", {}).items():
+            prompt_template_key = f"advisor_{advisor_key}";
+            if prompt_template_key in PROMPT_TEMPLATES:
+                prompt_kwargs = {"persona": advisor_cfg['persona'], "text_for_analysis": text_for_advisors, "original_thought":debate_state["original_thought_text"], "all_pro_args_summary":all_pro_args_summary, "all_con_args_summary":all_con_args_summary}
+                prompt = self._render_prompt(prompt_template_key, **prompt_kwargs)
+                raw_response = self.llm_client.get_chat_completion(messages=[{"role":"user", "content":prompt}], temperature=advisor_cfg['temperature'], max_tokens=advisor_cfg.get('max_tokens'), json_mode=True)
+                parsed_response = {};
+                if raw_response and not raw_response.startswith("[LLM_"):
+                    try: parsed_response = json.loads(raw_response)
+                    except: parsed_response = {"_raw": raw_response, "error": "JSON parse failed for advisor"}
+                else: parsed_response = {"_raw": raw_response, "error": "LLM call failed for advisor"}
+                advisor_outputs[advisor_key] = parsed_response; debate_state["advisor_inputs_log"].append({"type": f"final_{advisor_key}", **parsed_response})
+            else: self.logger.warning(f"No prompt template found for advisor: {advisor_key}")
+        return advisor_outputs
+
+    # --- Public Methods (start_new_debate, advance_debate_round, get_debate_status, conclude_debate, fork_debate) ---
+    # --- export_debate_memory_map, export_debate_graphviz, get_debate_data_for_visualization, _log_game_event ---
+    # These are largely the same as v2.1.1, with minor internal call adjustments if needed (e.g., to _load_debate_state_from_file).
+    def start_new_debate(self, thought_text: str, thought_id: Optional[str] = None, parent_debate_id: Optional[str] = None) -> Dict[str, Any]: # Corrected
+        debate_id = "debate_" + (thought_id or generate_short_uuid())
+        if debate_id in self.active_debates: self.logger.warning(f"Attempt to start existing active debate '{debate_id}'. Returning current state."); return self.active_debates[debate_id]
+        loaded_state = self._load_debate_state_from_file(debate_id)
+        if loaded_state: self.logger.warning(f"Debate ID '{debate_id}' exists on disk. Loading."); self.active_debates[debate_id]=loaded_state; return loaded_state
+        self.logger.info(f"Starting new debate (ID: {debate_id}, Parent: {parent_debate_id or 'None'}) on thought: '{thought_text[:100]}...' for user '{self.username}'")
+        initial_score = float(self.config.get("initial_thought_score", 50.0)); lineage = []
+        if parent_debate_id: parent_state = self.get_debate_status(parent_debate_id); lineage = (parent_state.get("lineage_log_ids", []) if parent_state else []) + [parent_debate_id]
+        debate_state = { "debate_id": debate_id, "original_thought_text": thought_text, "original_thought_id": thought_id or debate_id.replace("debate_","thought_"), "parent_debate_id": parent_debate_id, "lineage_log_ids": lineage, "status": "active", "current_round": 0, "max_rounds": int(self.config.get("debate_rounds_max", 3)), "thought_strength_score": initial_score, "consensus_level": 0.5, "rounds_history": [], "pro_arguments_log": [], "con_arguments_log": [], "advisor_inputs_log": [], "created_at": datetime.now(timezone.utc).isoformat(), "last_updated_at": datetime.now(timezone.utc).isoformat(), "final_summary_digest": None, "_checksum": None, "username": self.username }
+        self.active_debates[debate_id] = debate_state; self._save_debate_state(debate_id)
+        self._log_game_event(debate_id, "debate_started", {"thought": thought_text, "initial_score": initial_score, "parent":parent_debate_id})
+        return debate_state
+
+    def advance_debate_round(self, debate_id: str) -> Dict[str, Any]: # Corrected
+        if debate_id not in self.active_debates:
+            if not self._load_debate_state_from_file(debate_id): msg = f"Debate ID '{debate_id}' not found for advancing round."; self.logger.error(msg); raise ValueError(msg)
+        debate_state = self.active_debates[debate_id]
+        if debate_state["status"] != "active": self.logger.info(f"Debate '{debate_id}' is {debate_state['status']}."); return debate_state
+        if debate_state["current_round"] >= debate_state["max_rounds"]: self.logger.info(f"Debate '{debate_id}' max rounds. Concluding."); return self.conclude_debate(debate_id)
+        debate_state["current_round"] += 1; current_round_num = debate_state["current_round"]
+        self.logger.info(f"Advancing debate '{debate_id}' to round {current_round_num} of {debate_state['max_rounds']}.")
+        pro_args_this_round: List[Dict] = []; con_args_this_round: List[Dict] = []
+        agents_per_side = int(self.config.get("agents_per_side_per_round", 1))
+        existing_pro_summary = "; ".join([arg.get('argument_text',"") for arg in debate_state.get("pro_arguments_log", [])][-3:])[:self.config.get("max_argument_length_for_prompt", 150)*agents_per_side]
+        existing_con_summary = "; ".join([arg.get('argument_text',"") for arg in debate_state.get("con_arguments_log", [])][-3:])[:self.config.get("max_argument_length_for_prompt", 150)*agents_per_side]
+        for i in range(agents_per_side):
+            pro_id = f"{debate_id}_r{current_round_num}_pro_{i+1}"; pro_data = self._llm_generate_argument(debate_id, existing_pro_summary, self.config["debate_agents"]["pro"], "pro", current_round_num, True) # Passed debate_id
+            pro_data.update({"id":pro_id, "round":current_round_num, "type":"pro"}); pro_args_this_round.append(pro_data);
+            con_id = f"{debate_id}_r{current_round_num}_con_{i+1}"; con_data = self._llm_generate_argument(debate_id, existing_con_summary, self.config["debate_agents"]["con"], "con", current_round_num, True) # Passed debate_id
+            con_data.update({"id":con_id, "round":current_round_num, "type":"con"}); con_args_this_round.append(con_data);
+        round_eval = self._llm_evaluate_round_and_score(debate_state, pro_args_this_round, con_args_this_round) # No extra summary needed here
+        debate_state["pro_arguments_log"].extend(pro_args_this_round); debate_state["con_arguments_log"].extend(con_args_this_round)
+        debate_state["thought_strength_score"] = round_eval["updated_thought_strength_score"]; debate_state["consensus_level"] = round_eval["updated_consensus_level"]
+        debate_state["rounds_history"].append({ "round": current_round_num, "pro_arguments_generated_this_round": pro_args_this_round, "con_arguments_generated_this_round": con_args_this_round, "round_evaluation_by_neutral_judge": round_eval })
+        debate_state["last_updated_at"] = datetime.now(timezone.utc).isoformat()
+        for arg_data in pro_args_this_round:
+            if arg_data.get("argument_text"): self._store_argument_in_faiss(debate_id, arg_data["id"], arg_data["argument_text"], "pro", current_round_num, float(arg_data.get("persuasiveness_score",0)))
+        for arg_data in con_args_this_round:
+            if arg_data.get("argument_text"): self._store_argument_in_faiss(debate_id, arg_data["id"], arg_data["argument_text"], "con", current_round_num, float(arg_data.get("persuasiveness_score",0)))
+        self._save_debate_state(debate_id); self._log_game_event(debate_id, f"round_{current_round_num}_completed", debate_state["rounds_history"][-1])
+        recommendation = round_eval.get("recommend_next_action", "Continue Debate")
+        if "Conclude" in recommendation or debate_state["current_round"] >= debate_state["max_rounds"]: self.logger.info(f"Debate '{debate_id}' round {current_round_num} recommends conclusion or max rounds reached."); return self.conclude_debate(debate_id)
+        if "Seek Advisor Input" in recommendation:
+            advisor_type = recommendation.split(":")[-1].strip().lower(); self.logger.info(f"Seeking '{advisor_type}' advisor for debate '{debate_id}'. Running all advisors."); self._run_advisors(debate_state); self._save_debate_state(debate_id)
+        return debate_state
+    def _calculate_current_debate_metrics(self, debate_state: Dict[str, Any]) -> Tuple[float, float]:
+            """
+            Calculates the current overall thought strength and consensus level based on all
+            accumulated arguments in the debate state.
+
+            Args:
+                debate_state: The current state of the debate.
+
+            Returns:
+                A tuple containing:
+                    - current_thought_strength (float): Score from 0.0 to 100.0
+                    - current_debate_consensus (float): Score from 0.0 (max dissent/balance) to 1.0 (max consensus for one side).
+                                                        0.5 represents perfect balance or equal opposing persuasiveness.
+            """
+            all_pro_args = debate_state.get("pro_arguments_log", [])
+            all_con_args = debate_state.get("con_arguments_log", [])
+
+            total_pro_persuasion = sum(float(arg.get("persuasiveness_score", 0.0)) for arg in all_pro_args)
+            total_con_persuasion = sum(float(arg.get("persuasiveness_score", 0.0)) for arg in all_con_args)
+
+            # --- Calculate Thought Strength ---
+            # Start with initial score, then adjust based on the net cumulative persuasiveness of all arguments.
+            current_thought_strength = float(self.config.get("initial_thought_score", 50.0))
+
+            # The impact factor determines how much each "point" of net persuasiveness shifts the 0-100 strength score.
+            # If factor is 0.1, a net persuasiveness of +1 (e.g. one pro arg of 1.0, no con) shifts strength by 10 points.
+            pers_impact_on_strength = self.config.get("persuasiveness_score_impact_factor", 0.1) * 100
+
+            net_cumulative_persuasion_points = total_pro_persuasion - total_con_persuasion
+
+            current_thought_strength += (net_cumulative_persuasion_points * pers_impact_on_strength)
+
+            # Clamp thought strength to the 0-100 range
+            current_thought_strength = max(0.0, min(100.0, current_thought_strength))
+
+            # --- Calculate Debate Consensus ---
+            # Consensus ranges from 0.0 (CON side is completely dominant or only CON args exist)
+            # to 0.5 (perfectly balanced PRO and CON persuasiveness, or no persuasive args)
+            # to 1.0 (PRO side is completely dominant or only PRO args exist).
+            total_argument_persuasion = total_pro_persuasion + total_con_persuasion
+            current_debate_consensus = 0.5 # Default for no arguments or perfect balance
+            if total_argument_persuasion > 0:
+                current_debate_consensus = total_pro_persuasion / total_argument_persuasion
+
+            current_debate_consensus = max(0.0, min(1.0, current_debate_consensus)) # Clamp
+
+            self.logger.debug(f"Debate Metrics Recalculated for {debate_state.get('debate_id', 'UnknownDebate')}: "
+                            f"TotalProPers={total_pro_persuasion:.2f}, TotalConPers={total_con_persuasion:.2f} -> "
+                            f"Strength={current_thought_strength:.2f}, Consensus={current_debate_consensus:.3f}")
+
+            return round(current_thought_strength, 2), round(current_debate_consensus, 3)
+    def get_debate_status(self, debate_id: str) -> Optional[Dict[str, Any]]: # Corrected
+        if debate_id in self.active_debates: return self.active_debates[debate_id]
+        return self._load_debate_state_from_file(debate_id)
+
+    def conclude_debate(self, debate_id: str) -> Dict[str, Any]: # Corrected
+        if debate_id not in self.active_debates:
+            if not self._load_debate_state_from_file(debate_id): msg=f"Cannot conclude: Debate ID '{debate_id}' not found."; self.logger.error(msg); raise ValueError(msg)
+        debate_state = self.active_debates[debate_id]
+        # ... (rest of the conclude_debate logic from v2.1.1 is fine) ...
+        if debate_state["status"] != "active": self.logger.info(f"Debate '{debate_id}' already concluded: {debate_state['status']}"); return debate_state
+        self.logger.info(f"Concluding debate '{debate_id}'...")
+        final_strength, final_consensus = self._calculate_current_debate_metrics(debate_state)
+        debate_state["thought_strength_score"] = final_strength; debate_state["consensus_level"] = final_consensus
+        final_advisor_outputs = self._run_advisors(debate_state)
+        ethical_rating = final_advisor_outputs.get("ethics", {}).get("overall_ethical_rating", 0.0); impact_score = final_advisor_outputs.get("impact",{}).get("overall_impact_assessment_score", 0.0)
+        if final_strength >= self.config.get("consensus_threshold_promote", 70.0) and ethical_rating >= 0.4 and impact_score >= -0.2: debate_state["status"] = "concluded_promoted"
+        elif final_strength < self.config.get("consensus_threshold_reject", 40.0) or ethical_rating < 0.2 or impact_score < -0.5: debate_state["status"] = "concluded_rejected"
+        else: debate_state["status"] = "concluded_needs_human_review"
+        self.logger.info(f"Debate '{debate_id}' CONCLUSION: {debate_state['status']}. Strength: {final_strength:.2f}, Ethics: {ethical_rating:.2f}, Impact: {impact_score:.2f}")
+        if "promoted" in debate_state["status"] and self.config.get("debate_agents",{}).get("adversarial_validator"):
+            adv_cfg = self.config["debate_agents"]["adversarial_validator"]; synth_stmt = final_advisor_outputs.get("synthesis",{}).get("final_synthesized_statement",debate_state["original_thought_text"])
+            val_prompt = self._render_prompt("adversarial_validator", persona=adv_cfg['persona'], thought_to_validate=debate_state["original_thought_text"], synthesis_summary=synth_stmt[:500])
+            raw_val = self.llm_client.get_chat_completion(messages=[{"role":"user", "content":val_prompt}], temperature=adv_cfg['temperature'], max_tokens=adv_cfg.get('max_tokens'), json_mode=True)
+            val_res = {};
+            if raw_val and not raw_val.startswith("[LLM_"):
+                try: val_res = json.loads(raw_val)
+                except: val_res = {"_raw_error": "Validation JSON parse fail", "validation_status": "Error"}
+            else: val_res = {"_raw_error": raw_val, "validation_status": "Error Call"}
+            debate_state["adversarial_validation_result"] = val_res
+            if "Significant Flaws Found" in val_res.get("validation_status",""): self.logger.warning(f"Adversarial validation found flaws for {debate_id}."); debate_state["status"] = "concluded_promoted_major_flaws"
+            elif "Minor Concerns Found" in val_res.get("validation_status",""): self.logger.info(f"Adversarial validation minor concerns for {debate_id}."); debate_state["status"] = "concluded_promoted_minor_concerns"
+        top_pro_args = sorted(debate_state["pro_arguments_log"], key=lambda x:x.get("persuasiveness_score",0), reverse=True)[:2]
+        top_con_args = sorted(debate_state["con_arguments_log"], key=lambda x:x.get("persuasiveness_score",0), reverse=True)[:2]
+        advisor_summary = f"Synthesis: {final_advisor_outputs.get('synthesis',{}).get('final_synthesized_statement','N/A')[:100]}... Ethics: {final_advisor_outputs.get('ethics',{}).get('key_ethical_concerns',[])}. Impact: {final_advisor_outputs.get('impact',{}).get('overall_impact_assessment_score','N/A'):.2f}"
+        digest_prompt = self._render_prompt("debate_digest", original_thought=debate_state["original_thought_text"], final_status=debate_state["status"], final_strength_score=final_strength, top_pro_args_summary = "; ".join([arg.get("argument_text","")[:100]+"..." for arg in top_pro_args]), top_con_args_summary = "; ".join([arg.get("argument_text","")[:100]+"..." for arg in top_con_args]), advisor_insights_summary = advisor_summary)
+        debate_state["final_summary_digest"] = self.llm_client.get_chat_completion(messages=[{"role":"user", "content":digest_prompt}], temperature=0.2, max_tokens=600)
+        debate_state["last_updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._save_debate_state(debate_id); self._archive_debate_state(debate_id)
+        self._log_game_event(debate_id, "debate_concluded", {"final_status": debate_state["status"], "final_score": final_strength, "digest_preview": debate_state["final_summary_digest"][:100]+"..." if debate_state["final_summary_digest"] else "N/A"})
+        conclusion_text = f"Debate Conclusion for ID '{debate_id}': {debate_state['final_summary_digest'] if debate_state['final_summary_digest'] else 'See full state.'}"
+        self._store_argument_in_faiss(debate_id, f"{debate_id}_final_digest", conclusion_text, "digest", debate_state["current_round"], final_strength / 100.0)
+        return debate_state
+
+    def fork_debate(self, parent_debate_id: str, mutated_thought_text: str, new_thought_id: Optional[str]=None) -> Optional[Dict[str,Any]]: # Identical
+        parent_state = self.get_debate_status(parent_debate_id)
+        if not parent_state: self.logger.error(f"Cannot fork: Parent debate ID '{parent_debate_id}' not found."); return None
+        forked_thought_id = new_thought_id or f"fork_{parent_debate_id.replace('debate_','')}_{generate_short_uuid(6)}"
+        self.logger.info(f"Forking debate '{parent_debate_id}' to '{forked_thought_id}' for user '{self.username}' with mutation: '{mutated_thought_text[:100]}...'")
+        new_debate_state = self.start_new_debate(thought_text=mutated_thought_text, thought_id=forked_thought_id, parent_debate_id=parent_debate_id)
+        new_debate_state["thought_strength_score"] = parent_state.get("thought_strength_score", self.config["initial_thought_score"]) * 0.75
+        self._save_debate_state(new_debate_state["debate_id"])
+        self._log_game_event(new_debate_state["debate_id"], "debate_forked", {"parent_debate_id": parent_debate_id, "mutated_thought": mutated_thought_text})
+        return new_debate_state
+
+    def _log_game_event(self, debate_id: str, event_type: str, event_data: Dict[str, Any]): # Identical
+        if not self.config.get("log_to_jsonl", False): return
+        log_entry = {"timestamp": datetime.now(timezone.utc).isoformat(), "debate_id": debate_id, "username": self.username, "event_type": event_type, "data": event_data}
+        try:
+            Path(self.game_log_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(self.game_log_path, "a", encoding="utf-8") as f: f.write(json.dumps(log_entry, default=str) + "\n")
+        except Exception as e: self.logger.error(f"Error writing game log {self.game_log_path}: {e}", exc_info=True)
+
+    def get_debate_data_for_visualization(self, debate_id: str) -> Optional[Dict[str, Any]]: # Identical
+        debate_state = self.get_debate_status(debate_id);
+        if not debate_state: return None
+        vis_data = { "debate_id": debate_id, "original_thought": debate_state["original_thought_text"], "status": debate_state["status"], "username": debate_state.get("username"), "final_strength_score": debate_state.get("thought_strength_score"), "final_consensus_level": debate_state.get("consensus_level"), "lineage": debate_state.get("lineage_log_ids", []), "rounds": [], "final_digest": debate_state.get("final_summary_digest"), "adversarial_validation": debate_state.get("adversarial_validation_result") }
+        for i, round_data in enumerate(debate_state.get("rounds_history", [])):
+            vis_data["rounds"].append({ "round_number": round_data.get("round", i + 1),
+                          "pro_arguments": [{"id": arg.get("id"), "text": arg.get("argument_text"), "score": arg.get("persuasiveness_score")} for arg in round_data.get("pro_arguments_generated_this_round", [])],
+                          "con_arguments": [{"id": arg.get("id"), "text": arg.get("argument_text"), "score": arg.get("persuasiveness_score")} for arg in round_data.get("con_arguments_generated_this_round", [])],
+                          "evaluation": round_data.get("round_evaluation_by_neutral_judge", {}) })
+        vis_data["advisors"] = debate_state.get("advisor_inputs_log", [])
+        return vis_data
+
+    def export_debate_memory_map(self, debate_id: str, format: str = 'csv', output_dir: Optional[Union[str, Path]] = None) -> Optional[Path]: # Identical
+        debate_state = self.get_debate_status(debate_id);
+        if not debate_state: self.logger.error(f"Cannot export map: Debate ID '{debate_id}' not found."); return None
+        output_path = Path(output_dir or self.user_data_base_path / "exports" / "memory_maps").resolve(); output_path.mkdir(parents=True, exist_ok=True)
+        file_stem = f"{self.username}_{debate_id}_memory_map"; records = []
+        for arg_log_key in ["pro_arguments_log", "con_arguments_log"]:
+            for arg_data in debate_state.get(arg_log_key, []):
+                faiss_id_proxy = next((meta.get("faiss_internal_id") for meta in self.arguments_faiss_metadata if meta.get("argument_id") == arg_data.get("id")), "N/A")
+                records.append({ "debate_id": debate_id, "username": self.username, "argument_id": arg_data.get("id"), "type": arg_data.get("type"), "round": arg_data.get("round"), "text": arg_data.get("argument_text"), "persuasiveness_score": arg_data.get("persuasiveness_score"), "keywords": ", ".join(arg_data.get("keywords", [])), "faiss_vector_id_proxy": faiss_id_proxy })
+        if not records: self.logger.info(f"No arguments to export for debate '{debate_id}'."); return None
+        output_file: Optional[Path] = None
+        try:
+            if format == 'csv':
+                output_file = output_path / f"{file_stem}.csv"
+                with open(output_file, 'w', newline='', encoding='utf-8') as csvf: fieldnames = records[0].keys(); writer = csv.DictWriter(csvf, fieldnames=fieldnames); writer.writeheader(); writer.writerows(records)
+            elif format == 'jsonl':
+                output_file = output_path / f"{file_stem}.jsonl"
+                with open(output_file, 'w', encoding='utf-8') as jsonlf:
+                    for record in records: jsonlf.write(json.dumps(record, ensure_ascii=False) + "\n")
+            else: self.logger.error(f"Unsupported export format: {format}."); return None
+            self.logger.info(f"Debate memory map exported to {format.upper()}: {output_file}"); return output_file
+        except Exception as e: self.logger.error(f"Error exporting {format.upper()} memory map: {e}"); return None
+
+    def export_debate_graphviz(self, debate_id: str) -> Optional[str]: # Identical
+        if not GRAPHVIZ_AVAILABLE: self.logger.warning("Graphviz library not available."); return None
+        debate_state = self.get_debate_status(debate_id);
+        if not debate_state: return None
+        from graphviz import Digraph
+        dot = Digraph(comment=f'Debate Graph for {debate_id}', graph_attr={'rankdir':'TD', 'fontsize':'10', 'label': f"Debate: {debate_id} (User: {self.username})", 'labelloc':'t'}, node_attr={'fontsize':'9', 'shape':'box', 'style':'filled'}, edge_attr={'fontsize':'8'})
+        orig_thought_score = debate_state.get('thought_strength_score', 'N/A')
+        if isinstance(orig_thought_score, float): orig_thought_score = f"{orig_thought_score:.1f}"
+        dot.node('original_thought', f"Original (ID: {debate_state['original_thought_id']})\n\"{debate_state['original_thought_text'][:80]}...\"\nInitial Score: {self.config.get('initial_thought_score',50.0):.1f}", fillcolor='skyblue')
+        for r_idx, round_data in enumerate(debate_state.get("rounds_history", [])):
+            round_node_id = f"round_{r_idx+1}"; round_eval = round_data.get("evaluation", {});
+            strength = round_eval.get('updated_thought_strength_score', 'N/A'); consensus = round_eval.get('updated_consensus_level', 'N/A')
+            round_label = (f"Round {r_idx+1}\nSummary: {str(round_eval.get('round_summary_text', 'N/A'))[:50]}...\nStrength: {strength if isinstance(strength,str) else f'{strength:.1f}'}\nConsensus: {consensus if isinstance(consensus,str) else f'{consensus:.2f}'}\nRec: {round_eval.get('recommend_next_action', 'N/A')}")
+            dot.node(round_node_id, round_label, shape='ellipse', fillcolor='lightyellow')
+            parent_node = 'original_thought' if r_idx == 0 else f"round_{r_idx}"; dot.edge(parent_node, round_node_id)
+            for arg_list_key, color in [("pro_arguments_generated_this_round", "palegreen"), ("con_arguments_generated_this_round", "lightcoral")]:
+                for arg in round_data.get(arg_list_key, []):
+                    arg_id_node = arg.get('id', generate_short_uuid(6)); score = arg.get('persuasiveness_score',0); text = arg.get('argument_text', '');
+                    dot.node(arg_id_node, f"{arg.get('type','').upper()}: {text[:60]}...\n(Score: {score:.2f})", shape='note', fillcolor=color)
+                    dot.edge(round_node_id, arg_id_node)
+        final_status_node_id = "final_status"; final_status_label = f"Final Status: {debate_state['status']}\nDigest: {str(debate_state.get('final_summary_digest', 'N/A'))[:80]}..."; dot.node(final_status_node_id, final_status_label, shape='diamond', fillcolor='gold')
+        last_round_node = f"round_{len(debate_state.get('rounds_history',[]))}" if debate_state.get('rounds_history') else 'original_thought'; dot.edge(last_round_node, final_status_node_id)
+        self.logger.info(f"Generated Graphviz DOT string for debate '{debate_id}'."); return dot.source
+
+# --- Helper for UUID ---
+def generate_short_uuid(length: int = 8) -> str: # No change
+    return uuid.uuid4().hex[:length]
+
+# === Standalone Test / Example Usage with Structured Test Plan ---
+def run_structured_tests_v2_1(test_plan_file: Union[str, Path], council_game_instance: 'ThoughtDebateCouncilGame'): # Corrected type hint
+    # ... (same as v2.1.0) ...
+    main_test_logger = logging.getLogger("StructuredTestRunnerV2.1")
+    main_test_logger.info(f"\n--- Running Structured Test Plan v2.1 from: {test_plan_file} ---")
+    try:
+        with open(test_plan_file, "r", encoding="utf-8") as f: test_plan = json.load(f)
+    except Exception as e: main_test_logger.error(f"Failed to load test plan '{test_plan_file}': {e}"); return
+    total_tests = 0; passed_tests = 0
+    for i, test_case in enumerate(test_plan.get("debate_test_cases", [])):
+        total_tests += 1; main_test_logger.info(f"\n--- Test Case {i+1}: {test_case.get('description', 'Unnamed Test')} ---")
+        initial_thought = test_case.get("initial_thought"); expected_outcome = test_case.get("expected_outcome", {}); max_rounds_for_test = test_case.get("run_max_rounds", council_game_instance.config["debate_rounds_max"])
+        if not initial_thought: main_test_logger.error("Skipping: 'initial_thought' missing."); continue
+        debate_state = council_game_instance.start_new_debate(initial_thought, thought_id=test_case.get("custom_thought_id"))
+        debate_id = debate_state["debate_id"]
+        for r_tc in range(max_rounds_for_test):
+            if debate_state["status"] != "active": break
+            main_test_logger.info(f"  Test advancing round {r_tc+1} for debate '{debate_id}'..."); debate_state = council_game_instance.advance_debate_round(debate_id)
+        if debate_state["status"] == "active": debate_state = council_game_instance.conclude_debate(debate_id)
+        main_test_logger.info(f"  Test Debate '{debate_id}' Final Status: {debate_state['status']}, Score: {debate_state['thought_strength_score']:.2f}")
+        case_passed = True
+        if "final_status_should_be" in expected_outcome and debate_state["status"] != expected_outcome["final_status_should_be"]: main_test_logger.error(f"    FAIL: Exp status '{expected_outcome['final_status_should_be']}', got '{debate_state['status']}'."); case_passed = False
+        if "final_status_should_be_one_of" in expected_outcome and debate_state["status"] not in expected_outcome["final_status_should_be_one_of"]: main_test_logger.error(f"    FAIL: Exp status one of {expected_outcome['final_status_should_be_one_of']}, got '{debate_state['status']}'."); case_passed = False
+        if "min_strength_score" in expected_outcome and debate_state["thought_strength_score"] < expected_outcome["min_strength_score"]: main_test_logger.error(f"    FAIL: Exp min strength '{expected_outcome['min_strength_score']}', got '{debate_state['thought_strength_score']:.2f}'."); case_passed = False
+        if "max_strength_score" in expected_outcome and debate_state["thought_strength_score"] > expected_outcome["max_strength_score"]: main_test_logger.error(f"    FAIL: Exp max strength '{expected_outcome['max_strength_score']}', got '{debate_state['thought_strength_score']:.2f}'."); case_passed = False
+        if case_passed: passed_tests += 1; main_test_logger.info("    ✅ Test Case PASSED.")
+        else: main_test_logger.info("    ❌ Test Case FAILED.")
+        export_dir = council_game_instance.user_data_base_path / "test_plan_exports" / Path(test_plan_file).stem; export_dir.mkdir(exist_ok=True,parents=True)
+        council_game_instance.export_debate_memory_map(debate_id, format="csv", output_dir=export_dir)
+        dot_src_tc = council_game_instance.export_debate_graphviz(debate_id)
+        if dot_src_tc and GRAPHVIZ_AVAILABLE:
+            try:
+                dot_fpath_tc = export_dir / f"{council_game_instance.username}_{debate_id}_graph.dot"
+                with open(dot_fpath_tc, "w", encoding="utf-8") as df_tc: df_tc.write(dot_src_tc)
+                main_test_logger.info(f"    Graphviz DOT file for test case saved to {dot_fpath_tc}")
+            except Exception as e_gv_tc: main_test_logger.error(f"    Error saving Graphviz DOT for test: {e_gv_tc}")
+    main_test_logger.info(f"\n--- Structured Test Summary: {passed_tests} / {total_tests} PASSED ---")
+
+
 if __name__ == "__main__":
     # ... (CLI Test section remains identical to v2.1.0, ensuring `run_structured_tests_v2_1` is called if --test-mode)
     council_logger.setLevel(logging.DEBUG) 
@@ -436,18 +1002,84 @@ if __name__ == "__main__":
     if not main_test_logger_cli_v211.handlers:
         _mh_cli_v211 = logging.StreamHandler(sys.stdout); _mf_cli_v211 = logging.Formatter('%(asctime)s - %(name)s [%(levelname)s] - %(message)s'); _mh_cli_v211.setFormatter(_mf_cli_v211); main_test_logger_cli_v211.addHandler(_mh_cli_v211)
     main_test_logger_cli_v211.setLevel(logging.INFO)
-    main_test_logger_cli_v211.info("\n" + "="*70); main_test_logger_cli_v211.info("🚀 思考討論評議会ゲーム v2.1.1 - CLIインターフェース＆テスト 🚀".center(70)); main_test_logger_cli_v211.info("="*70 + "\n")
-    session_username_cli = input("このセッションのユーザー名を入力してください（例：'test_user'）: ").strip()
+    main_test_logger_cli_v211.info("\n" + "="*70); main_test_logger_cli_v211.info("🚀 THOUGHT DEBATE COUNCIL GAME v2.1.1 - CLI INTERFACE & TEST 🚀".center(70)); main_test_logger_cli_v211.info("="*70 + "\n")
+    session_username_cli = input("Enter your username for this session (e.g., 'test_user'): ").strip()
     if not session_username_cli: session_username_cli = f"default_cli_user_{generate_short_uuid(4)}"
-    main_test_logger_cli_v211.info(f"このセッションのユーザー名: {session_username_cli}")
-    # ... rest of the CLI logic with translated strings
-    # ...
-    if not cli_debate_state_interactive:
-        thought_txt = input("新しい討論のための最初の思考を入力してください: ").strip() or "創造的な芸術におけるAIの倫理"
-        cli_debate_state_interactive = council_game_cli_instance.start_new_debate(thought_txt)
-    # ...
-    while cli_debate_state_interactive["status"] == "active" and cli_debate_state_interactive["current_round"] < cli_debate_state_interactive["max_rounds"]: # type: ignore
-        action = input(f"\nラウンド {cli_debate_state_interactive['current_round']+1}: [A]dvance(進む), [S]tatus(状態), [F]ork(分岐), [E]xport Map(エクスポート), [G]raphviz, [C]onclude(結論), [Q]uit(終了): ").strip().lower() # type: ignore
-        if action == 'q': break
-        # ... and so on for other commands
-    main_test_logger_cli_v211.info("\n🏁 思考討論評議会ゲーム v2.1.1 - CLIセッション完了 🏁")
+    main_test_logger_cli_v211.info(f"Username for this session: {session_username_cli}")
+    api_key_env_cli_main = os.getenv("OPENAI_API_KEY")
+    cli_llm_client_main: BaseLLMClient
+    if not api_key_env_cli_main:
+        main_test_logger_cli_v211.warning("OPENAI_API_KEY env var not set. CLI test LLM calls will use DUMMY client.")
+        class DummyLLMClient(BaseLLMClient):
+            def __init__(self): super().__init__("dummy_key", "dummy_model"); self.is_ready=True
+            def get_chat_completion(self, messages, model=None, temperature=0.7, max_tokens=None, json_mode=False):
+                main_test_logger_cli_v211.info(f"DummyLLM: ChatCompletion. JSON Mode: {json_mode}. Prompt: {messages[-1]['content'][:70]}...");
+                if json_mode: return json.dumps({"argument_text":f"Dummy arg {random.randint(1,100)}","persuasiveness_score":random.uniform(0.3,0.8),"keywords":["dummy"],"round_summary_text":"Dummy eval summary.","updated_thought_strength_score":random.uniform(30,70),"updated_consensus_level":random.uniform(0.2,0.8),"recommend_next_action":"Continue Debate","reason_for_recommendation":"Dummy reason.","final_synthesized_statement":"Dummy synthesis.","synthesis_confidence":0.6,"key_ethical_concerns":[],"overall_ethical_rating":0.7,"potential_positive_impacts":[],"potential_negative_risks":[],"overall_impact_assessment_score":0.1,"validation_status":"Confirmed Valid", "identified_issues_or_counterarguments":[], "confidence_in_validation":0.9})
+                return "Dummy LLM Response for CLI test."
+            def get_embedding(self, text, model=None, dim=None): # type: ignore
+                target_dim = dim or DEFAULT_GAME_CONFIG_V2_1["embedding_dim"]
+                return [random.random() for _ in range(target_dim)]
+        cli_llm_provider_main = DummyLLMClient()
+    else:
+        cli_llm_provider_main = OpenAIClient(api_key=api_key_env_cli_main)
+    cli_game_config_main = { "user_data_path_root": "./council_cli_user_data_v2_1", "debate_rounds_max": int(os.getenv("CLI_DEBATE_ROUNDS", "2")), "agents_per_side_per_round": 1, "enable_personality_drift": True, }
+    council_game_cli_instance = ThoughtDebateCouncilGame( llm_client=cli_llm_provider_main, username=session_username_cli, config=cli_game_config_main )
+    if "--test-mode" in sys.argv:
+        test_plan_arg_idx = sys.argv.index("--test-mode") + 1
+        if test_plan_arg_idx < len(sys.argv):
+            test_plan_file_path_main = Path(sys.argv[test_plan_arg_idx]).resolve()
+            if test_plan_file_path_main.is_file(): run_structured_tests_v2_1(test_plan_file_path_main, council_game_cli_instance)
+            else: main_test_logger_cli_v211.error(f"Test plan file not found: {test_plan_file_path_main}")
+        else: main_test_logger_cli_v211.error("Usage: python <script_name>.py --test-mode <path_to_test_plan.json>")
+    else:
+        main_test_logger_cli_v211.info("\n--- Interactive Debate Session ---")
+        active_user_debates_cli = [f.stem for f in council_game_cli_instance.debates_path.glob("*.json")]
+        cli_debate_state_interactive: Optional[Dict[str,Any]] = None
+        if active_user_debates_cli:
+            main_test_logger_cli_v211.info("Existing active debates for this user:"); [print(f"  {i+1}. {d_id}") for i, d_id in enumerate(active_user_debates_cli)]
+            load_choice_cli = input("Load existing debate? (Enter number or 'n' for new): ").strip().lower()
+            if load_choice_cli.isdigit() and 1 <= int(load_choice_cli) <= len(active_user_debates_cli):
+                debate_id_to_load = active_user_debates_cli[int(load_choice_cli)-1]
+                cli_debate_state_interactive = council_game_cli_instance.get_debate_status(debate_id_to_load)
+                if not cli_debate_state_interactive: main_test_logger_cli_v211.error(f"Error loading {debate_id_to_load}. Starting new.")
+        if not cli_debate_state_interactive:
+            thought_txt = input("Enter initial thought for new debate: ").strip() or "The ethics of AI in creative arts."
+            cli_debate_state_interactive = council_game_cli_instance.start_new_debate(thought_txt)
+        debate_id_interactive = cli_debate_state_interactive["debate_id"] # type: ignore
+        main_test_logger_cli_v211.info(f"\nDebate '{debate_id_interactive}' (User: {session_username_cli}) | Round {cli_debate_state_interactive['current_round']}/{cli_debate_state_interactive['max_rounds']}") # type: ignore
+        main_test_logger_cli_v211.info(f"Thought: \"{cli_debate_state_interactive['original_thought_text'][:80]}...\"") # type: ignore
+        main_test_logger_cli_v211.info(f"Strength: {cli_debate_state_interactive['thought_strength_score']:.2f}, Consensus: {cli_debate_state_interactive['consensus_level']:.2f}") # type: ignore
+        while cli_debate_state_interactive["status"] == "active" and cli_debate_state_interactive["current_round"] < cli_debate_state_interactive["max_rounds"]: # type: ignore
+            action = input(f"\nRound {cli_debate_state_interactive['current_round']+1}: [A]dvance, [S]tatus, [F]ork, [E]xport Map, [G]raphviz, [C]onclude, [Q]uit: ").strip().lower() # type: ignore
+            if action == 'q': break
+            elif action == 's': print(json.dumps(council_game_cli_instance.get_debate_status(debate_id_interactive), indent=2, default=str))
+            elif action == 'f':
+                mutation = input("Enter mutation for forking: ").strip()
+                if mutation: council_game_cli_instance.fork_debate(debate_id_interactive, mutation)
+                else: print("Fork requires mutation.")
+            elif action == 'e':
+                fmt = input("Export format (csv/jsonl): ").strip().lower() or "csv"; council_game_cli_instance.export_debate_memory_map(debate_id_interactive, format=fmt)
+            elif action == 'g':
+                dot_str_cli = council_game_cli_instance.export_debate_graphviz(debate_id_interactive)
+                if dot_str_cli and GRAPHVIZ_AVAILABLE:
+                    dot_fpath_cli = council_game_cli_instance.user_data_base_path / "exports" / f"{session_username_cli}_{debate_id_interactive}_graph.dot"; dot_fpath_cli.parent.mkdir(exist_ok=True,parents=True)
+                    with open(dot_fpath_cli, "w", encoding="utf-8") as df_main: df_main.write(dot_str_cli)
+                    main_test_logger_cli_v211.info(f"Graphviz DOT file saved: {dot_fpath_cli}. Use Graphviz to render (e.g., `dot -Tpng {dot_fpath_cli} -o graph.png`)")
+                else: main_test_logger_cli_v211.warning("Could not generate Graphviz (library might be missing).")
+            elif action == 'c': break
+            elif action == 'a' or action == '':
+                main_test_logger_cli_v211.info(f"\n--- Advancing to Round {cli_debate_state_interactive['current_round'] + 1} ---") # type: ignore
+                cli_debate_state_interactive = council_game_cli_instance.advance_debate_round(debate_id_interactive)
+                main_test_logger_cli_v211.info(f"--- Round {cli_debate_state_interactive['current_round']} Summary ---") # type: ignore
+                latest_rh_cli = cli_debate_state_interactive["rounds_history"][-1] if cli_debate_state_interactive.get("rounds_history") else {} # type: ignore
+                print(f"  Judge Summary: {latest_rh_cli.get('round_evaluation_by_neutral_judge',{}).get('round_summary_text', 'N/A')}")
+                print(f"  Judge Rec: {latest_rh_cli.get('round_evaluation_by_neutral_judge',{}).get('recommend_next_action', 'N/A')}")
+                print(f"  Thought Strength: {cli_debate_state_interactive['thought_strength_score']:.2f}, Consensus: {cli_debate_state_interactive['consensus_level']:.2f}") # type: ignore
+            else: print("Invalid action.")
+        if cli_debate_state_interactive["status"] == "active": # type: ignore
+            main_test_logger_cli_v211.info(f"\n--- Concluding Debate '{debate_id_interactive}' ---")
+            cli_debate_state_interactive = council_game_cli_instance.conclude_debate(debate_id_interactive)
+        main_test_logger_cli_v211.info("\n--- Final Interactive Debate State ---")
+        print(json.dumps(cli_debate_state_interactive, indent=2, default=str))
+        if cli_debate_state_interactive.get("final_summary_digest"): print(f"\n--- Debate Digest ---\n{cli_debate_state_interactive['final_summary_digest']}") # type: ignore
+    main_test_logger_cli_v211.info("\n🏁 THOUGHT DEBATE COUNCIL GAME v2.1.1 - CLI SESSION COMPLETE 🏁")
