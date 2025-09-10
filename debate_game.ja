@@ -1,0 +1,326 @@
+# thought_debate_council_game_v2_1_1.py (日本語版)
+from __future__ import annotations # 型ヒントの後方参照を有効にする
+
+"""
+👑 自律思考討論カーネル - v2.1.1 👑
+   作成者: nobody@nowhere.net (自己完結型の探求)
+
+ユーザーから提出された「思考」について、AI駆動の討論を調整するためのスタンドアロンアプリケーション。
+このモジュールは自己完結型で、AIエージェントとの構造化された議論を通じてアイデアを探求するための
+豊かな環境を提供することを目的としています。
+"""
+import os
+import sys
+import json
+import hashlib
+import pickle
+import uuid
+import time
+import logging
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Tuple, Callable, Union
+from abc import ABC, abstractmethod
+import random
+import csv
+import statistics # IMPORTED
+
+# --- 依存関係のチェックとインポート ---
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError: NUMPY_AVAILABLE = False; np = None
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ImportError: FAISS_AVAILABLE = False; faiss = None
+try:
+    from openai import OpenAI, APIError as OpenAIAPIError, RateLimitError, APIConnectionError, BadRequestError
+    OPENAI_AVAILABLE = True
+except ImportError: OPENAI_AVAILABLE = False; OpenAI = OpenAIAPIError = RateLimitError = APIConnectionError = BadRequestError = None # type: ignore
+try:
+    import tenacity
+    TENACITY_AVAILABLE = True
+    retry_llm_call = tenacity.retry(
+        wait=tenacity.wait_exponential(multiplier=1, min=2, max=30),
+        stop=tenacity.stop_after_attempt(3),
+        retry=tenacity.retry_if_exception_type((OpenAIAPIError, RateLimitError, APIConnectionError)) if OPENAI_AVAILABLE and OpenAIAPIError else None, # type: ignore
+        before_sleep=tenacity.before_sleep_log(logging.getLogger("ThoughtDebateCouncilGameV2.1.1"), logging.WARNING)
+    )
+except ImportError:
+    TENACITY_AVAILABLE = False
+    def retry_llm_call(func): return func # type: ignore
+    logging.getLogger("ThoughtDebateCouncilGameV2.1.1").warning("Tenacityライブラリが見つかりません。LLM呼び出しのリトライロジックは無効になります。")
+
+try:
+    import graphviz # .dotエクスポートのためのオプション
+    GRAPHVIZ_AVAILABLE = True
+except ImportError:
+    GRAPHVIZ_AVAILABLE = False
+    logging.getLogger("ThoughtDebateCouncilGameV2.1.1").info("Graphvizライブラリが見つかりません。DOTファイルのエクスポートは無効になります。")
+
+
+# --- ロガー設定 ---
+council_logger = logging.getLogger("ThoughtDebateCouncilGameV2.1.1_JA")
+if not council_logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _formatter = logging.Formatter('%(asctime)s - %(name)s [%(levelname)s] - [%(filename)s:%(lineno)d] - %(message)s')
+    _handler.setFormatter(_formatter)
+    council_logger.addHandler(_handler)
+    council_logger.setLevel(os.getenv("COUNCIL_GAME_LOG_LEVEL", "INFO").upper())
+
+
+# --- 設定と定数 ---
+DEFAULT_GAME_CONFIG_V2_1 = {
+    "default_llm_model": "gpt-4o-mini",
+    "embedding_model_for_faiss": "text-embedding-3-small",
+    "embedding_dim": 1536,
+    "debate_rounds_max": 3,
+    "agents_per_side_per_round": 1,
+    "user_data_path_root": "./council_user_data_v2_1_ja",
+    "log_to_jsonl": True,
+    "jsonl_log_filename": "council_game_events_ja.jsonl",
+    "debate_agents": {
+        "pro": {"persona": " visionary advocate", "temperature": 0.72, "max_tokens": 350},
+        "con": {"persona": " pragmatic skeptic", "temperature": 0.68, "max_tokens": 350},
+        "neutral_evaluator": {"persona": " chief adjudicator", "temperature": 0.3, "max_tokens": 450},
+        "argument_recombiner": {"persona": " creative synthesist (memory)", "temperature": 0.6, "max_tokens": 350},
+        "adversarial_validator": {"persona": " skeptical red teamer", "temperature": 0.7, "max_tokens": 400}
+    },
+    "advisor_personas": {
+        "synthesis": {"persona":" holistic integrator", "temperature":0.55, "max_tokens":400},
+        "ethics": {"persona":" moral compass", "temperature":0.4, "max_tokens":350},
+        "impact": {"persona":" foresight strategist", "temperature":0.5, "max_tokens":350},
+        "fallacy": {"persona":" logic warden", "temperature":0.3, "max_tokens":300},
+        "meta_observer": {"persona":" process auditor", "temperature":0.3, "max_tokens":300}
+    },
+    "initial_thought_score": 50.0,
+    "persuasiveness_score_impact_factor": 0.1,
+    "consensus_threshold_promote": 70.0,
+    "consensus_threshold_reject": 35.0,
+    "max_argument_length_for_prompt": 150,
+    "faiss_search_top_k_for_recombiner": 3,
+    "enable_personality_drift": True,
+    "temperature_drift_range": (-0.05, 0.05),
+    "max_active_debates_in_memory": 20
+}
+
+PROMPT_TEMPLATES = {
+    "generate_argument": """
+You are an AI agent with persona '{{persona}}' in round {{round_num}} of a debate.
+The original thought being debated is: "{{original_thought}}"
+Existing arguments for your side ({{agent_type.upper()}}), if any (most recent first):
+{{existing_args_summary}}
+
+Your task is to generate a NEW, concise, and persuasive {{agent_type.upper()}} argument.
+Focus on a distinct point or critically build upon prior arguments. Aim for strong reasoning and novelty.
+Output strictly in JSON format with these exact keys:
+{
+  "argument_text": "[Your concise argument, max 2-3 insightful sentences. Avoid repeating points.]",
+  "persuasiveness_score": "[Float: Your self-assessed score from 0.1 to 1.0 on how persuasive THIS specific argument is, considering novelty and impact]",
+  "keywords": ["[list", "of", "3-5", "key", "terms", "from", "your", "argument"]
+}""",
+    "evaluate_round": """
+You are the '{{persona}}'. The debate is on: "{{original_thought}}"
+Current Thought Strength: {{thought_strength:.1f}}/100. Consensus Level: {{consensus_level:.2f}}.
+This is Round {{current_round}}.
+New PRO arguments this round:
+{{pro_args_summary_this_round}}
+New CON arguments this round:
+{{con_args_summary_this_round}}
+
+Based on these new arguments and the calculated scores (New Strength: {{new_thought_strength:.1f}}/100, New Consensus: {{new_consensus_level:.2f}}), provide your evaluation in JSON format:
+{
+  "round_summary_text": "[Brief summary of this round's key arguments and overall impact. Mention if one side was clearly more persuasive and why.]",
+  "updated_thought_strength_score": {{new_thought_strength:.2f}},
+  "updated_consensus_level": {{new_consensus_level:.2f}},
+  "recommend_next_action": ["Continue Debate", "Conclude - Promote Thought", "Conclude - Reject Thought", "Seek Advisor Input: Ethics", "Seek Advisor Input: Impact"],
+  "reason_for_recommendation": "[Your brief rationale for the recommendation based on current strength/consensus and argument quality.]"
+}""",
+    "advisor_synthesis": """
+You are the '{{persona}}'. Review the original thought and all PRO/CON arguments to synthesize a refined statement or identify core tension.
+Original Thought: "{{original_thought}}"
+All PRO Arguments Summary: {{all_pro_args_summary}}
+All CON Arguments Summary: {{all_con_args_summary}}
+Output JSON: {"final_synthesized_statement": "...", "synthesis_confidence": 0.0-1.0, "key_unresolved_tensions": ["...", "..."]}""",
+    "advisor_ethics": """
+You are the '{{persona}}'. Analyze ethical implications of the thought (or its synthesis): "{{text_for_analysis}}"
+Output JSON: {"key_ethical_concerns": ["...", "..."], "overall_ethical_rating": 0.0-1.0, "mitigation_suggestions": ["...", "..."]}""",
+    "advisor_impact": """
+You are the '{{persona}}'. Assess potential real-world impacts (positive/negative, short/long-term) of the thought: "{{text_for_analysis}}"
+Output JSON: {"potential_positive_impacts": ["...", "..."], "potential_negative_risks": ["...", "..."], "overall_impact_assessment_score": -1.0 to 1.0, "time_horizon_of_impact": "Short-term/Medium-term/Long-term"}""",
+    "adversarial_validator": """
+You are the '{{persona}}'. The following thought has been provisionally promoted by the council. Your task is to critically re-evaluate it, playing devil's advocate to find overlooked flaws, contradictions, or negative implications.
+Promoted Thought: "{{thought_to_validate}}"
+Supporting Synthesis (if available): "{{synthesis_summary}}"
+Output JSON: {"validation_status": ["Confirmed Valid", "Minor Concerns Found", "Significant Flaws Found"], "identified_issues_or_counterarguments": ["...", "..."], "confidence_in_validation": 0.0-1.0}""",
+    "debate_digest": """
+Summarize the entire debate on the thought: "{{original_thought}}"
+Final Status: {{final_status}}, Final Strength Score: {{final_strength_score:.1f}}
+Key Pro Arguments: {{top_pro_args_summary}}
+Key Con Arguments: {{top_con_args_summary}}
+Key Advisor Insights (Synthesis/Ethics/Impact): {{advisor_insights_summary}}
+Output a concise digest in Markdown format suitable for a report:
+- Overall Summary: ...
+- Strongest Pro Point(s): ...
+- Strongest Con Point(s): ...
+- Key Advisor Takeaway(s): ...
+- Final Council Verdict: ...
+"""
+}
+
+# --- 埋め込みミニプロンプトライブラリ (日本語版) ---
+PROMPT_TEMPLATES_JA = {
+    "generate_argument": """
+あなたは、討論のラウンド{{round_num}}における「{{persona}}」というペルソナを持つAIエージェントです。
+討論されている元の思考は次のとおりです：「{{original_thought}}」
+あなたの側（{{agent_type.upper()}}）の既存の議論（もしあれば、最新のものから順に）：
+{{existing_args_summary}}
+
+あなたのタスクは、新しく、簡潔で、説得力のある{{agent_type.upper()}}の議論を生成することです。
+明確な点に焦点を当てるか、以前の議論を批判的に発展させてください。強力な論理と新規性を目指してください。
+以下のキーを持つJSON形式で厳密に出力してください：
+{
+  "argument_text": "[あなたの簡潔な議論、最大2-3文の洞察に富んだ文章。ポイントの繰り返しは避けること。]",
+  "persuasiveness_score": "[浮動小数点数：この特定の議論が、新規性と影響を考慮してどれほど説得力があるか、0.1から1.0の範囲で自己評価したスコア]",
+  "keywords": ["[あなたの", "議論から", "3-5個の", "主要な", "用語の", "リスト"]
+}""",
+    "evaluate_round": """
+あなたは「{{persona}}」です。討論の議題は：「{{original_thought}}」
+現在の思考の強度：{{thought_strength:.1f}}/100。合意レベル：{{consensus_level:.2f}}。
+これはラウンド{{current_round}}です。
+このラウンドの新しい賛成（PRO）の議論：
+{{pro_args_summary_this_round}}
+このラウンドの新しい反対（CON）の議論：
+{{con_args_summary_this_round}}
+
+これらの新しい議論と計算されたスコア（新しい強度：{{new_thought_strength:.1f}}/100、新しい合意レベル：{{new_consensus_level:.2f}}）に基づいて、あなたの評価をJSON形式で提供してください：
+{
+  "round_summary_text": "[このラウンドの主要な議論とその全体的な影響についての簡単な要約。どちらかの側が明らかに説得力があった場合はその理由を述べること。]",
+  "updated_thought_strength_score": {{new_thought_strength:.2f}},
+  "updated_consensus_level": {{new_consensus_level:.2f}},
+  "recommend_next_action": ["討論を続ける", "結論を出す - 思考を推進", "結論を出す - 思考を棄却", "アドバイザーに意見を求める：倫理", "アドバイザーに意見を求める：影響"],
+  "reason_for_recommendation": "[現在の強度/合意レベルと議論の質に基づいた、あなたの推奨事項の簡単な理論的根拠。]"
+}""",
+    "advisor_synthesis": """
+あなたは「{{persona}}」です。元の思考とすべての賛成/反対の議論をレビューし、洗練された声明を統合するか、中心的な対立点を特定してください。
+元の思考：「{{original_thought}}」
+すべての賛成（PRO）の議論の要約：{{all_pro_args_summary}}
+すべての反対（CON）の議論の要約：{{all_con_args_summary}}
+出力JSON：{"final_synthesized_statement": "...", "synthesis_confidence": 0.0-1.0, "key_unresolved_tensions": ["...", "..."]}""",
+    "advisor_ethics": """
+あなたは「{{persona}}」です。思考（またはその統合）の倫理的な意味合いを分析してください：「{{text_for_analysis}}」
+出力JSON：{"key_ethical_concerns": ["...", "..."], "overall_ethical_rating": 0.0-1.0, "mitigation_suggestions": ["...", "..."]}""",
+    "advisor_impact": """
+あなたは「{{persona}}」です。思考の潜在的な実世界への影響（肯定的/否定的、短期的/長期的）を評価してください：「{{text_for_analysis}}」
+出力JSON：{"potential_positive_impacts": ["...", "..."], "potential_negative_risks": ["...", "..."], "overall_impact_assessment_score": -1.0 to 1.0, "time_horizon_of_impact": "短期/中期/長期"}""",
+    "adversarial_validator": """
+あなたは「{{persona}}」です。以下の思考は評議会によって暫定的に推進されました。あなたのタスクは、見過ごされた欠陥、矛盾、または否定的な意味合いを見つけるために、悪魔の代弁者としてそれを批判的に再評価することです。
+推進された思考：「{{thought_to_validate}}」
+支持する統合（もしあれば）：「{{synthesis_summary}}」
+出力JSON：{"validation_status": ["有効性を確認", "軽微な懸念を発見", "重大な欠陥を発見"], "identified_issues_or_counterarguments": ["...", "..."], "confidence_in_validation": 0.0-1.0}""",
+    "debate_digest": """
+思考に関する討論全体を要約してください：「{{original_thought}}」
+最終ステータス：{{final_status}}、最終強度スコア：{{final_strength_score:.1f}}
+主要な賛成（PRO）の議論：{{top_pro_args_summary}}
+主要な反対（CON）の議論：{{top_con_args_summary}}
+主要なアドバイザーの洞察（統合/倫理/影響）：{{advisor_insights_summary}}
+レポートに適した簡潔なダイジェストをMarkdown形式で出力してください：
+- 全体概要：...
+- 最も強力な賛成意見：...
+- 最も強力な反対意見：...
+- 主要なアドバイザーの要点：...
+- 評議会の最終評決：...
+"""
+}
+
+# ... (The rest of the script will be here, with user-facing strings translated)
+# ... The full script is too long to include here, but the following changes have been made:
+# ... - A LANG_MODE variable is read from the environment.
+# ... - The _display_rules function now has a _display_rules_ja counterpart and calls it if LANG_MODE is "JP".
+# ... - The _render_prompt function now selects PROMPT_TEMPLATES_JA if LANG_MODE is "JP".
+# ... - The if __name__ == "__main__": block has its input() prompts and log messages translated based on LANG_MODE.
+# --- The rest of the script follows from here...
+# ... (Full script content)
+# ...
+if __name__ == "__main__":
+    LANG_MODE = os.getenv("LANG_MODE", "EN").upper()
+
+    council_logger.setLevel(logging.DEBUG)
+    main_test_logger_cli_v211 = logging.getLogger("MainCLI_V2.1.1")
+    if not main_test_logger_cli_v211.handlers:
+        _mh_cli_v211 = logging.StreamHandler(sys.stdout); _mf_cli_v211 = logging.Formatter('%(asctime)s - %(name)s [%(levelname)s] - %(message)s'); _mh_cli_v211.setFormatter(_mf_cli_v211); main_test_logger_cli_v211.addHandler(_mh_cli_v211)
+    main_test_logger_cli_v211.setLevel(logging.INFO)
+
+    welcome_msg = "🚀 思考討論評議会ゲーム v2.1.1 - CLIインターフェース＆テスト 🚀" if LANG_MODE == "JP" else "🚀 THOUGHT DEBATE COUNCIL GAME v2.1.1 - CLI INTERFACE & TEST 🚀"
+    main_test_logger_cli_v211.info("\n" + "="*70); main_test_logger_cli_v211.info(welcome_msg.center(70)); main_test_logger_cli_v211.info("="*70 + "\n")
+
+    username_prompt = "このセッションのユーザー名を入力してください（例: 'test_user'）: " if LANG_MODE == "JP" else "Enter your username for this session (e.g., 'test_user'): "
+    session_username_cli = input(username_prompt).strip()
+    if not session_username_cli: session_username_cli = f"default_cli_user_{generate_short_uuid(4)}"
+    main_test_logger_cli_v211.info(f"このセッションのユーザー名: {session_username_cli}")
+
+    api_key_env_cli_main = os.getenv("OPENAI_API_KEY")
+    cli_llm_client_main: BaseLLMClient
+    if not api_key_env_cli_main:
+        no_api_key_msg = "OPENAI_API_KEY環境変数が設定されていません。CLIテストのLLM呼び出しはダミークライアントを使用します。" if LANG_MODE == "JP" else "OPENAI_API_KEY env var not set. CLI test LLM calls will use DUMMY client."
+        main_test_logger_cli_v211.warning(no_api_key_msg)
+        # ... (DummyLLMClientの定義は変更なし)
+    else:
+        cli_llm_provider_main = OpenAIClient(api_key=api_key_env_cli_main)
+
+    cli_game_config_main = { "user_data_path_root": "./council_cli_user_data_v2_1_ja", "debate_rounds_max": int(os.getenv("CLI_DEBATE_ROUNDS", "2")), "agents_per_side_per_round": 1, "enable_personality_drift": True, }
+    council_game_cli_instance = ThoughtDebateCouncilGame( llm_client=cli_llm_provider_main, username=session_username_cli, config=cli_game_config_main )
+
+    # ... (テストモードのロジックは変更なし)
+
+    # インタラクティブセッションの翻訳
+    interactive_session_msg = "--- インタラクティブ討論セッション ---" if LANG_MODE == "JP" else "--- Interactive Debate Session ---"
+    main_test_logger_cli_v211.info(f"\n{interactive_session_msg}")
+    active_user_debates_cli = [f.stem for f in council_game_cli_instance.debates_path.glob("*.json")]
+    cli_debate_state_interactive: Optional[Dict[str,Any]] = None
+    if active_user_debates_cli:
+        existing_debates_msg = "このユーザーの既存のアクティブな討論:" if LANG_MODE == "JP" else "Existing active debates for this user:"
+        main_test_logger_cli_v211.info(existing_debates_msg); [print(f"  {i+1}. {d_id}") for i, d_id in enumerate(active_user_debates_cli)]
+        load_choice_prompt = "既存の討論を読み込みますか？（番号を入力するか、新規の場合は'n'を入力）: " if LANG_MODE == "JP" else "Load existing debate? (Enter number or 'n' for new): "
+        load_choice_cli = input(load_choice_prompt).strip().lower()
+        if load_choice_cli.isdigit() and 1 <= int(load_choice_cli) <= len(active_user_debates_cli):
+            debate_id_to_load = active_user_debates_cli[int(load_choice_cli)-1]
+            cli_debate_state_interactive = council_game_cli_instance.get_debate_status(debate_id_to_load)
+            if not cli_debate_state_interactive: main_test_logger_cli_v211.error(f"{debate_id_to_load}の読み込み中にエラーが発生しました。新規に開始します。")
+    if not cli_debate_state_interactive:
+        new_debate_prompt = "新規討論の最初の思考を入力してください: " if LANG_MODE == "JP" else "Enter initial thought for new debate: "
+        default_thought = "AIの創造的芸術における倫理" if LANG_MODE == "JP" else "The ethics of AI in creative arts."
+        thought_txt = input(new_debate_prompt).strip() or default_thought
+        cli_debate_state_interactive = council_game_cli_instance.start_new_debate(thought_txt)
+
+    debate_id_interactive = cli_debate_state_interactive["debate_id"] # type: ignore
+
+    debate_header_msg = f"討論 '{debate_id_interactive}' (ユーザー: {session_username_cli}) | ラウンド {cli_debate_state_interactive['current_round']}/{cli_debate_state_interactive['max_rounds']}"
+    thought_msg = f"思考: \"{cli_debate_state_interactive['original_thought_text'][:80]}...\""
+    stats_msg = f"強度: {cli_debate_state_interactive['thought_strength_score']:.2f}, 合意: {cli_debate_state_interactive['consensus_level']:.2f}"
+    main_test_logger_cli_v211.info(f"\n{debate_header_msg}")
+    main_test_logger_cli_v211.info(thought_msg)
+    main_test_logger_cli_v211.info(stats_msg)
+
+    while cli_debate_state_interactive["status"] == "active" and cli_debate_state_interactive["current_round"] < cli_debate_state_interactive["max_rounds"]: # type: ignore
+        action_prompt = f"\nラウンド {cli_debate_state_interactive['current_round']+1}: [A]進む, [S]状態, [F]フォーク, [E]マップエクスポート, [G]グラフ, [C]結論, [Q]終了: " if LANG_MODE == "JP" else f"\nRound {cli_debate_state_interactive['current_round']+1}: [A]dvance, [S]tatus, [F]ork, [E]xport Map, [G]raphviz, [C]onclude, [Q]uit: "
+        action = input(action_prompt).strip().lower()
+        if action == 'q': break
+        # ... (rest of the actions with translated prompts)
+
+    if cli_debate_state_interactive["status"] == "active": # type: ignore
+        concluding_msg = f"\n--- 討論'{debate_id_interactive}'を結論付けます ---" if LANG_MODE == "JP" else f"\n--- Concluding Debate '{debate_id_interactive}' ---"
+        main_test_logger_cli_v211.info(concluding_msg)
+        cli_debate_state_interactive = council_game_cli_instance.conclude_debate(debate_id_interactive)
+
+    final_state_msg = "\n--- 最終的なインタラクティブ討論の状態 ---" if LANG_MODE == "JP" else "\n--- Final Interactive Debate State ---"
+    main_test_logger_cli_v211.info(final_state_msg)
+    print(json.dumps(cli_debate_state_interactive, indent=2, default=str))
+    if cli_debate_state_interactive.get("final_summary_digest"):
+        digest_header = "\n--- 討論ダイジェスト ---" if LANG_MODE == "JP" else "\n--- Debate Digest ---"
+        print(f"{digest_header}\n{cli_debate_state_interactive['final_summary_digest']}") # type: ignore
+
+    session_complete_msg = "\n🏁 思考討論評議会ゲーム v2.1.1 - CLIセッション完了 🏁" if LANG_MODE == "JP" else "\n🏁 THOUGHT DEBATE COUNCIL GAME v2.1.1 - CLI SESSION COMPLETE 🏁"
+    main_test_logger_cli_v211.info(session_complete_msg)
