@@ -213,7 +213,15 @@ DEFAULT_MCS_THEME_KEYWORDS_FOR_ANALYSIS_INTERNAL = {
 # ⚙️ Usage: Instantiated by CitadelHub, requires hub_instance (for config/services), memory_controller, log_reader, temporal_engine. ║
 #╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
 class MemoryContextService:
-    __version__ = "7.6.3" # Incremented version for fixes
+    """
+    Orchestrates the assembly of rich contextual prompts for AI agents.
+
+    This service integrates various Citadel data services to provide relevant,
+    coherent, and continuous context for AI agent interactions. It layers
+    information from vector memory, anchor memory, logs, and user profiles
+    to enhance the quality of AI responses.
+    """
+    __version__ = "7.6.3"
     _service_name = _SERVICE_LOGGER_NAME_MCS_MAIN
     def __init__(self,
                  hub_instance: 'CitadelHub',
@@ -223,9 +231,27 @@ class MemoryContextService:
                  embedding_service: Optional['EmbeddingService'] = None,
                  user_profile_service: Optional['UserProfileService'] = None,
                  lingo_adapter: Optional[Any] = None,
-                 **kwargs): # Added **kwargs to catch any unexpected args from Hub if any
-      
-        self.instance_id = cmn_generate_short_uuid_mcs(6) # type: ignore
+                 **kwargs):
+        """
+        Initializes the MemoryContextService.
+
+        Args:
+            hub_instance (CitadelHub): An instance of the CitadelHub for accessing
+                shared services and configuration.
+            memory_controller (Optional[MemoryControllerService], optional): A service
+                for interacting with memory. Defaults to None.
+            log_reader (Optional[LogReaderService], optional): A service for reading
+                and analyzing logs. Defaults to None.
+            temporal_engine (Optional[TemporalEngineService], optional): A service for
+                temporal analysis. Defaults to None.
+            embedding_service (Optional[EmbeddingService], optional): A service for
+                generating embeddings. Defaults to None.
+            user_profile_service (Optional[UserProfileService], optional): A service
+                for managing user profiles. Defaults to None.
+            lingo_adapter (Optional[Any], optional): A language adapter. Defaults to None.
+            **kwargs: Additional keyword arguments.
+        """
+        self.instance_id = cmn_generate_short_uuid_mcs(6)
         self.logger = logging.getLogger(f"{_SERVICE_LOGGER_NAME_MCS_MAIN}.instance.{self.instance_id}")
         self.logger.setLevel(logging.DEBUG)
         self.logger.info(f"[F956][CAPS:MCS_INFO] Initializing MemoryContextService v{self.__version__} (Instance: {self.instance_id})...")
@@ -235,24 +261,22 @@ class MemoryContextService:
         if not self.hub or not hasattr(self.hub, 'SYSTEM_CONFIG') or not self.hub.SYSTEM_CONFIG:
             self.init_error_detail = "[F956][CAPS:MCS_ERR] CitadelHub instance or SYSTEM_CONFIG is missing or not ready."
             self.logger.critical(f"[{self._service_name}] Critical init error: {self.init_error_detail}")
-            return # Exit early
-        # Get MCS-specific config from Hub's SYSTEM_CONFIG
-        self.config: Dict[str, Any] = {} # Default to empty dict
+            return
+        self.config: Dict[str, Any] = {}
         services_config = getattr(self.hub.SYSTEM_CONFIG, 'services', None)
         if services_config:
             mcs_config_obj = getattr(services_config, 'memory_context_service_config', None)
-            if mcs_config_obj: # If it's a Pydantic model
+            if mcs_config_obj:
                 if hasattr(mcs_config_obj, 'model_dump'):
-                    self.config = mcs_config_obj.model_dump() # Convert Pydantic model to dict
-                else: # Fallback if it's already a dict or some other object
+                    self.config = mcs_config_obj.model_dump()
+                else:
                     self.config = mcs_config_obj if isinstance(mcs_config_obj, dict) else {}
-            elif hasattr(services_config, 'memory_context_service'): # Fallback for direct dict access (less ideal)
+            elif hasattr(services_config, 'memory_context_service'):
                 self.config = getattr(services_config, 'memory_context_service', {})
                 if not isinstance(self.config, dict): self.config = {}
-        if not self.config: # Log if no specific config was found after trying
+        if not self.config:
             self.logger.warning(f"[{self._service_name}] 'memory_context_service_config' (or alias 'memory_context_service') not found or empty in Hub's SYSTEM_CONFIG.services. Using internal defaults for MCS parameters.")
           
-        # Set log level based on config
         log_level_str_mcs_final = str(self.config.get("mcs_log_level", "INFO")).upper()
         self.logger.setLevel(getattr(logging, log_level_str_mcs_final, logging.INFO))
         log_level_name_mcs = logging.getLevelName(self.logger.getEffectiveLevel())
@@ -260,48 +284,41 @@ class MemoryContextService:
         self.memory_controller = memory_controller
         self.log_reader = log_reader
       
-        # Resolve TemporalEngineService: use provided, or try to get from Hub (using get_service)
         self.temporal_engine = temporal_engine
         if not self.temporal_engine:
-            retrieved_te = self.hub.get_service("TemporalEngineService") # Name change here: Use get_service
+            retrieved_te = self.hub.get_service("TemporalEngineService")
             if retrieved_te:
                 self.temporal_engine = retrieved_te
                 self.logger.info(f"[{self._service_name}] Using TemporalEngineService obtained from Hub.")
             else:
                 self.logger.warning(f"[{self._service_name}] TemporalEngineService not passed to MCS __init__ and not available via Hub.get_service().")
-        # Check for TemporalEngineService readiness after attempting to get it
-        if not (self.temporal_engine and hasattr(self.temporal_engine, 'is_ready') and self.temporal_engine.is_ready()): # type: ignore
+        if not (self.temporal_engine and hasattr(self.temporal_engine, 'is_ready') and self.temporal_engine.is_ready()):
             self.init_error_detail = "[F956][CAPS:MCS_ERR] TemporalEngineService not provided or not ready (via Hub or direct)."
             self.logger.critical(f"[{self._service_name}] Critical dependency error: {self.init_error_detail}")
-            return # TemporalEngine is critical for MCS logic
-        # Optional services: use provided, or try to get from Hub (using get_service), or None
+            return
         self.embedding_service = embedding_service
         if not self.embedding_service:
-            retrieved_es = self.hub.get_service("EmbeddingService") # Name change here: Use get_service
+            retrieved_es = self.hub.get_service("EmbeddingService")
             if retrieved_es:
                 self.embedding_service = retrieved_es
                 self.logger.info(f"[{self._service_name}] Using EmbeddingService obtained from Hub.")
         self.user_profile_service = user_profile_service
         if not self.user_profile_service:
-            retrieved_ups = self.hub.get_service("UserProfileService") # Name change here: Use get_service
+            retrieved_ups = self.hub.get_service("UserProfileService")
             if retrieved_ups:
                 self.user_profile_service = retrieved_ups
                 self.logger.info(f"[{self._service_name}] Using UserProfileService obtained from Hub.")
         self.lingo_adapter = lingo_adapter
-        # MODIFIED: Validate critical injected dependencies - now optional, log warnings
-        if not (self.memory_controller and hasattr(self.memory_controller, 'is_ready') and self.memory_controller.is_ready()): # type: ignore
+        if not (self.memory_controller and hasattr(self.memory_controller, 'is_ready') and self.memory_controller.is_ready()):
             self.logger.warning(f"[{self._service_name}] MemoryControllerService not provided or not ready. Contextual memory storage/retrieval will be limited/non-functional.")
-            self.memory_controller = None # Ensure it's None if not ready
+            self.memory_controller = None
           
-        if not (self.log_reader and hasattr(self.log_reader, 'is_ready') and self.log_reader.is_ready()): # type: ignore
+        if not (self.log_reader and hasattr(self.log_reader, 'is_ready') and self.log_reader.is_ready()):
             self.logger.warning(f"[{self._service_name}] LogReaderService not provided or not ready. Log-based context retrieval will be limited/non-functional.")
-            self.log_reader = None # Ensure it's None if not ready
+            self.log_reader = None
           
-        # If init_error_detail was set by a critical failure above (like TemporalEngine), return
         if self.init_error_detail:
             return
-        # Load configurations with robust defaults
-        # # Using self.config which is now a dict, or DEFAULT constants
         self.curiosity_seeds = self.config.get("mcs_curiosity_seeds", DEFAULT_MCS_CURIOSITY_SEEDS_INTERNAL)
         self.growth_keywords = self.config.get("mcs_growth_keywords", DEFAULT_MCS_GROWTH_DETECTION_KEYWORDS_INTERNAL)
         self.default_anchor_keys = self.config.get("mcs_default_anchor_keys", DEFAULT_MCS_ANCHOR_KEYS_INTERNAL)
@@ -309,21 +326,18 @@ class MemoryContextService:
         self.theme_keywords_internal = self.config.get("mcs_theme_keywords", DEFAULT_MCS_THEME_KEYWORDS_FOR_ANALYSIS_INTERNAL)
         self.enable_file_logging = self.config.get("mcs_enable_file_logging", True)
         self.forward_to_memory_controller = self.config.get("mcs_forward_to_memory_controller", False)
-        # Log path setup
-        _op_log_dir_str_mcs = self.config.get("mcs_operational_log_dir") # From MCS specific config dict
+        _op_log_dir_str_mcs = self.config.get("mcs_operational_log_dir")
         if _op_log_dir_str_mcs:
             self.mcs_op_log_dir = Path(_op_log_dir_str_mcs).resolve()
-        else: # Fallback using Hub paths
+        else:
             try:
-                # Ensure constants.py has PATH_KEY_LOGS_ROOT_DIR or similar
-                logs_root_key = getattr(cds_constants_mcs, 'PATH_KEY_LOGS_ROOT_DIR', 'logs_root_dir_resolved') # type: ignore
-                # Using safe_get_path for robustness
-                hub_log_root_str = self.hub.safe_get_path(logs_root_key) # This is also good
+                logs_root_key = getattr(cds_constants_mcs, 'PATH_KEY_LOGS_ROOT_DIR', 'logs_root_dir_resolved')
+                hub_log_root_str = self.hub.safe_get_path(logs_root_key)
                 self.mcs_op_log_dir = Path(hub_log_root_str) / "memory_context_service" if hub_log_root_str else Path("./TEMP_MCS_LOGS_FALLBACK_2") / "memory_context_service"
             except KeyError:
                 self.logger.warning(f"Path key for 'logs_root_dir' not in Hub paths. Using local fallback for MCS logs.")
                 self.mcs_op_log_dir = Path("./TEMP_MCS_LOGS_FALLBACK_3") / "memory_context_service"
-            except Exception as e_hub_path_mcs: # Catch other errors like hub.get_path not existing if hub is a mock
+            except Exception as e_hub_path_mcs:
                 self.logger.warning(f"Failed to get logs_root_dir from Hub ({e_hub_path_mcs}), using local fallback for MCS logs.")
                 self.mcs_op_log_dir = Path("./TEMP_MCS_LOGS_FALLBACK_4") / "memory_context_service"
           
@@ -334,39 +348,56 @@ class MemoryContextService:
             self.logger.info(f"[{self._service_name}] Operational logs target directory: {self.mcs_op_log_dir}")
         except OSError as e_mkdir_mcs_final:
             self.logger.error(f"[{self._service_name}] Failed to create operational log directory {self.mcs_op_log_dir}: {e_mkdir_mcs_final}. Some local logging may fail.")
-            self.ext_reflection_log_path = None # type: ignore
-            self.build_trace_log_path = None # type: ignore
+            self.ext_reflection_log_path = None
+            self.build_trace_log_path = None
           
-        self._initialized = True # Mark successful initialization IF it reaches here
+        self._initialized = True
         self.logger.info(f"[F956][CAPS:MCS_INFO] MemoryContextService v{self.__version__} (Instance: {self.instance_id}) core initialization complete. Log Level: {logging.getLevelName(self.logger.level)}.")
         if not self.memory_controller: self.logger.warning("[F956][CAPS:MCS_WARN] MCS initialized but MemoryController is UNAVAILABLE.")
         if not self.log_reader: self.logger.warning("[F956][CAPS:MCS_WARN] MCS initialized but LogReader is UNAVAILABLE.")
     def is_ready(self) -> bool:
+        """
+        Checks if the service and its critical dependencies are ready.
+
+        Returns:
+            bool: True if the service is ready, False otherwise.
+        """
         if not self._initialized:
             self.logger.warning(f"[{self._service_name}] Readiness check: Not initialized (_initialized is False). Error: {self.init_error_detail}.")
             return False
-        # Check critical dependencies again, as their state might change post-init for some reason
-        # (though ideally they are stable after Hub init)
-        if not (self.temporal_engine and hasattr(self.temporal_engine, 'is_ready') and self.temporal_engine.is_ready()): # type: ignore
+        if not (self.temporal_engine and hasattr(self.temporal_engine, 'is_ready') and self.temporal_engine.is_ready()):
             self.logger.warning(f"[{self._service_name}] Readiness check: TemporalEngineService not ready.")
             return False
         if self.config.get("mcs_require_all_dependencies", False):
-            if not (self.memory_controller and hasattr(self.memory_controller, 'is_ready') and self.memory_controller.is_ready()): # type: ignore
+            if not (self.memory_controller and hasattr(self.memory_controller, 'is_ready') and self.memory_controller.is_ready()):
                 self.logger.warning(f"[{self._service_name}] Readiness check: MemoryControllerService not ready.")
                 return False
-            if not (self.log_reader and hasattr(self.log_reader, 'is_ready') and self.log_reader.is_ready()): # type: ignore
+            if not (self.log_reader and hasattr(self.log_reader, 'is_ready') and self.log_reader.is_ready()):
                 self.logger.warning(f"[{self._service_name}] Readiness check: LogReaderService not ready.")
                 return False
         return True
     def _current_utc_iso(self) -> str:
+        """Returns the current UTC time as an ISO 8601 string."""
         return datetime.now(dt_timezone.utc).isoformat()
     def store(self, *, agent_id: str, session_id: Optional[str], key: str, value: Any,
               tags: Optional[List[str]] = None, metadata: Optional[Dict[str, Any]] = None) -> bool:
         """
-        Best-effort structured store for agents expecting MemoryContextService.store(...).
-        - Always logs to an MCS JSONL.
-        - If MemoryControllerService.add_external_reflection(...) exists, forwards a reflection there.
-        Returns True on best-effort success, False only on hard exceptions.
+        Provides a best-effort structured store for agents.
+
+        This method logs the data to a local JSONL file and, if configured,
+        forwards it to the MemoryControllerService.
+
+        Args:
+            agent_id (str): The ID of the agent storing the data.
+            session_id (Optional[str]): The ID of the current session.
+            key (str): The key for the data.
+            value (Any): The value to store.
+            tags (Optional[List[str]], optional): A list of tags. Defaults to None.
+            metadata (Optional[Dict[str, Any]], optional): Additional metadata.
+                Defaults to None.
+
+        Returns:
+            bool: True on best-effort success, False on hard exceptions.
         """
         try:
             record = {
@@ -379,7 +410,6 @@ class MemoryContextService:
                 "tags": tags or [],
                 "metadata": metadata or {},
             }
-            # Log to MCS op log (or a local fallback)
             try:
                 if self.enable_file_logging:
                     if self.build_trace_log_path:
@@ -391,7 +421,6 @@ class MemoryContextService:
                             f.write(json.dumps(record, ensure_ascii=False) + "\n")
             except Exception as e_log:
                 self.logger.warning(f"[{self._service_name}] store(): failed to write log file: {e_log}")
-            # Forward to MemoryController if available
             if self.forward_to_memory_controller:
                 mc = getattr(self, "memory_controller", None)
                 if mc and hasattr(mc, "add_external_reflection"):
@@ -404,7 +433,7 @@ class MemoryContextService:
                             "metadata": metadata or {},
                             "timestamp_utc": record["timestamp"],
                         }
-                        mc.add_external_reflection(reflection, target_id=agent_id) # type: ignore
+                        mc.add_external_reflection(reflection, target_id=agent_id)
                     except Exception as e_mc:
                         self.logger.warning(f"[{self._service_name}] store(): add_external_reflection failed: {e_mc}")
             return True
@@ -427,6 +456,27 @@ class MemoryContextService:
                            session_id: Optional[str] = None,
                            current_interaction_metadata: Optional[Dict[str, Any]] = None,
                            ai_specific_profile_obj: Optional[Any] = None) -> str:
+        """
+        Assembles a complete contextual block for an AI agent's prompt.
+
+        This is the core orchestration pipeline of the service. It layers
+        information from multiple sources, including memory, logs, and profiles,
+        to create a rich context for the AI.
+
+        Args:
+            prompt (str): The base user prompt.
+            ai_agent_id (str): The ID of the AI agent.
+            user_id (Optional[str], optional): The ID of the user. Defaults to None.
+            session_id (Optional[str], optional): The ID of the current session.
+                Defaults to None.
+            current_interaction_metadata (Optional[Dict[str, Any]], optional):
+                Metadata about the current interaction. Defaults to None.
+            ai_specific_profile_obj (Optional[Any], optional): An object containing
+                the AI's specific profile. Defaults to None.
+
+        Returns:
+            str: The fully assembled contextual prompt.
+        """
         start_time_ctx_build_mcs = time.perf_counter()
         context_blocks_mcs: List[str] = []
         target_id_for_data_mcs = user_id or ai_agent_id
@@ -435,50 +485,42 @@ class MemoryContextService:
             err_msg_not_ready = f"[{self._service_name}] build_full_context called but service is not ready. Error: {self.init_error_detail or 'Core dependencies not met'}"
             self.logger.error(f"[F956][CAPS:MCS_ERR] {err_msg_not_ready}")
             return f"[CONTEXT_GENERATION_ERROR: {err_msg_not_ready}]\nUser Prompt: {prompt}"
-        # 1. Anchor Memory
         if self.memory_controller and hasattr(self.memory_controller, 'get_anchors_batch'):
             context_blocks_mcs.append(self._get_anchor_context_block(target_id_for_data_mcs))
         else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping anchor context - MemoryController or 'get_anchors_batch' unavailable.")
-        # 2. Relevant Vector Memories
         if self.memory_controller and hasattr(self.memory_controller, 'search_memory'):
             context_blocks_mcs.append(self._get_scored_vector_memory_context(prompt, target_id_for_data_mcs, session_id))
         else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping vector memory - MemoryController or 'search_memory' unavailable.")
           
-        # 3. Log Replay (Keyword-based from prompt)
         if self.log_reader and hasattr(self.log_reader, 'search_logs_by_keyword'):
             context_blocks_mcs.append(self._get_log_replay_context_block(prompt, target_id_for_data_mcs, session_id))
         else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping log replay - LogReader or 'search_logs_by_keyword' unavailable.")
-        # 4. Temporal Overlay
         if self.log_reader and hasattr(self.log_reader, 'get_recent_logs') and self.temporal_engine:
             limit_temporal_mcs = self.config.get("mcs_temporal_log_limit", 7)
-            recent_logs_mcs = self.log_reader.get_recent_logs(target_id=target_id_for_data_mcs, session_id=session_id, limit=limit_temporal_mcs) # type: ignore
-            context_blocks_mcs.append(self._format_temporal_summary_block(recent_logs_mcs or [])) # type: ignore
+            recent_logs_mcs = self.log_reader.get_recent_logs(target_id=target_id_for_data_mcs, session_id=session_id, limit=limit_temporal_mcs)
+            context_blocks_mcs.append(self._format_temporal_summary_block(recent_logs_mcs or []))
         else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping temporal overlay - LogReader/TemporalEngine issue.")
-        # 5. User/AI Profile & Trust
-        if self.user_profile_service and hasattr(self.user_profile_service, 'is_ready') and self.user_profile_service.is_ready(): # type: ignore
+        if self.user_profile_service and hasattr(self.user_profile_service, 'is_ready') and self.user_profile_service.is_ready():
             profile_identity_source_mcs = ai_specific_profile_obj or target_id_for_data_mcs
             if hasattr(self.user_profile_service, 'get_profile_summary_overlay'):
-                profile_overlay_mcs = self.user_profile_service.get_profile_summary_overlay(profile_identity_source_mcs) # type: ignore
+                profile_overlay_mcs = self.user_profile_service.get_profile_summary_overlay(profile_identity_source_mcs)
                 if profile_overlay_mcs: context_blocks_mcs.append(profile_overlay_mcs)
             if hasattr(self.user_profile_service, 'get_trust_snapshot_overlay'):
-                trust_overlay_mcs = self.user_profile_service.get_trust_snapshot_overlay(profile_identity_source_mcs) # type: ignore
+                trust_overlay_mcs = self.user_profile_service.get_trust_snapshot_overlay(profile_identity_source_mcs)
                 if trust_overlay_mcs: context_blocks_mcs.append(trust_overlay_mcs)
         else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping UserProfile context - UserProfileService unavailable or not ready.")
           
-        # 6. Thematic Focus
         if self.log_reader and hasattr(self.log_reader, 'get_session_text_blob'):
-            text_blob_for_focus_mcs = self.log_reader.get_session_text_blob(target_id=target_id_for_data_mcs, session_id=session_id) # type: ignore
+            text_blob_for_focus_mcs = self.log_reader.get_session_text_blob(target_id=target_id_for_data_mcs, session_id=session_id)
             if text_blob_for_focus_mcs:
                 context_blocks_mcs.append(self._summarize_text_focus(text_blob_for_focus_mcs, title_prefix="Thematic Focus"))
         else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping thematic focus - LogReader or 'get_session_text_blob' unavailable.")
-        # 7. Silence-Aware Context
         interaction_meta_mcs = current_interaction_metadata or {}
         silence_state_mcs = interaction_meta_mcs.get("silence_state")
         if silence_state_mcs and silence_state_mcs in self.config.get("mcs_silence_trigger_states_list", ["withdrawn", "disengaged"]):
             if self.log_reader and hasattr(self.log_reader, 'get_silence_trend_report_formatted'):
-                context_blocks_mcs.append(self.log_reader.get_silence_trend_report_formatted(target_id=target_id_for_data_mcs)) # type: ignore
+                context_blocks_mcs.append(self.log_reader.get_silence_trend_report_formatted(target_id=target_id_for_data_mcs))
             else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping silence context - LogReader or 'get_silence_trend_report_formatted' unavailable.")
-        # 8. Reflective Triggers
         if any(kw in prompt.lower() for kw in self.reflective_trigger_keywords):
             if self.log_reader and hasattr(self.log_reader, 'get_reflective_logs'):
                 context_blocks_mcs.append(self._get_reflective_log_snippets_block(target_id_for_data_mcs, session_id))
@@ -487,7 +529,6 @@ class MemoryContextService:
                 context_blocks_mcs.append(self._get_external_insights_summary_block(target_id_for_data_mcs))
             else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping external insights - LogReader or 'get_curated_external_insights' unavailable.")
           
-        # 9. Log Keyword Context
         prompt_themes_mcs = self._match_themes_from_text_internal(prompt)
         if prompt_themes_mcs:
             if self.log_reader and hasattr(self.log_reader, 'get_log_entries_by_keywords_list'):
@@ -495,7 +536,6 @@ class MemoryContextService:
                     keywords=prompt_themes_mcs, target_id=target_id_for_data_mcs, session_id=session_id))
             else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Skipping log keyword context - LogReader or 'get_log_entries_by_keywords_list' unavailable.")
           
-        # 10. Standard Log Analysis Summaries from LogReaderService
         log_analysis_methods_mcs = [
             "get_log_signature_trends_formatted", "get_keyword_frequency_map_formatted",
             "get_conceptual_vocabulary_formatted", "get_session_summary_stats_formatted",
@@ -508,27 +548,26 @@ class MemoryContextService:
                     block_mcs: Optional[str] = None
                     try:
                         if method_name_mcs == "get_keyword_completion_trace_formatted":
-                            raw_logs_for_compl_mcs = self.log_reader.get_raw_logs(target_id=target_id_for_data_mcs, session_id=session_id, limit=50) if hasattr(self.log_reader, 'get_raw_logs') else [] # type: ignore
+                            raw_logs_for_compl_mcs = self.log_reader.get_raw_logs(target_id=target_id_for_data_mcs, session_id=session_id, limit=50) if hasattr(self.log_reader, 'get_raw_logs') else []
                             keywords_for_compl_mcs = self._analyze_streak_domains_internal(raw_logs_for_compl_mcs or [])[:5]
                             if not keywords_for_compl_mcs and prompt_themes_mcs: keywords_for_compl_mcs = prompt_themes_mcs
                             elif not keywords_for_compl_mcs: keywords_for_compl_mcs = self.config.get("mcs_default_completion_keywords", ["general_info"])
-                            block_mcs = log_reader_method_mcs(keywords=keywords_for_compl_mcs, target_id=target_id_for_data_mcs, session_id=session_id) # type: ignore
+                            block_mcs = log_reader_method_mcs(keywords=keywords_for_compl_mcs, target_id=target_id_for_data_mcs, session_id=session_id)
                         elif method_name_mcs == "get_conceptual_vocabulary_formatted":
-                            block_mcs = log_reader_method_mcs(target_id=target_id_for_data_mcs, session_id=session_id, min_len=self.config.get("mcs_top_words_min_len",4)) # type: ignore
+                            block_mcs = log_reader_method_mcs(target_id=target_id_for_data_mcs, session_id=session_id, min_len=self.config.get("mcs_top_words_min_len",4))
                         else:
-                            block_mcs = log_reader_method_mcs(target_id=target_id_for_data_mcs, session_id=session_id) # type: ignore
+                            block_mcs = log_reader_method_mcs(target_id=target_id_for_data_mcs, session_id=session_id)
                         if block_mcs and isinstance(block_mcs, str): context_blocks_mcs.append(block_mcs)
                     except Exception as e_lr_method:
                         self.logger.warning(f"[F956][CAPS:MCS_WARN] MCS: Error calling LogReader method '{method_name_mcs}': {e_lr_method}")
                 else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: LogReader missing method '{method_name_mcs}'. Skipping this analysis block.")
         else: self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: LogReader unavailable. Skipping standard log analysis summaries.")
           
-        # 11. AI-Specific Profile Injections
-        if self.user_profile_service and hasattr(self.user_profile_service, 'is_ready') and self.user_profile_service.is_ready(): # type: ignore
+        if self.user_profile_service and hasattr(self.user_profile_service, 'is_ready') and self.user_profile_service.is_ready():
             id_source_mcs = user_id or (getattr(ai_specific_profile_obj, 'name', ai_agent_id) if ai_specific_profile_obj else ai_agent_id)
             if hasattr(self.user_profile_service, 'get_full_identity_context_block'):
                 try:
-                    identity_block_mcs = self.user_profile_service.get_full_identity_context_block(id_source_mcs, ai_specific_profile_obj) # type: ignore
+                    identity_block_mcs = self.user_profile_service.get_full_identity_context_block(id_source_mcs, ai_specific_profile_obj)
                     if identity_block_mcs: context_blocks_mcs.append(identity_block_mcs)
                 except Exception as e_ups_ident:
                     self.logger.warning(f"[F956][CAPS:MCS_WARN] MCS: Error getting identity block from UserProfileService: {e_ups_ident}")
@@ -543,7 +582,7 @@ class MemoryContextService:
             "mcs_event_type": "mcs_context_generated", "ai_agent_id": ai_agent_id, "user_id": user_id,
             "session_id": session_id, "prompt_chars": len(prompt),
             "final_context_chars": len(final_contextual_prompt_str_mcs),
-            "context_blocks_count": len([b for b in context_blocks_mcs if b and b.strip()]), # Count non-empty blocks
+            "context_blocks_count": len([b for b in context_blocks_mcs if b and b.strip()]),
             "duration_ms": round(duration_total_ms_mcs, 2),
             "trigger_keywords_in_prompt": [kw for kw in self.reflective_trigger_keywords if kw in prompt.lower()]
         }
@@ -553,13 +592,14 @@ class MemoryContextService:
         return final_contextual_prompt_str_mcs.strip()
     # --- Internal Helper Methods for Context Block Generation ---
     def _get_anchor_context_block(self, target_id: str) -> str:
+        """Gets the anchor context block."""
         if not (self.memory_controller and hasattr(self.memory_controller, 'get_anchors_batch')):
             self.logger.debug(f"[{self._service_name}] Skipping anchor context - MemoryController or 'get_anchors_batch' unavailable.")
             return ""
         keys_to_fetch = self.config.get("mcs_anchor_keys_list", DEFAULT_MCS_ANCHOR_KEYS_INTERNAL)
         limit = self.config.get("mcs_anchor_context_limit", 3)
         try:
-            fetched_anchors = self.memory_controller.get_anchors_batch(keys=keys_to_fetch, owner_id=target_id) # type: ignore
+            fetched_anchors = self.memory_controller.get_anchors_batch(keys=keys_to_fetch, owner_id=target_id)
             if not fetched_anchors: return ""
             anchor_lines = [f"- {key.replace('_',' ').title()}: {str(value)[:200]}{'...' if len(str(value)) > 200 else ''}"
                             for key, value in fetched_anchors.items() if value]
@@ -569,13 +609,14 @@ class MemoryContextService:
             return ""
           
     def _get_scored_vector_memory_context(self, prompt: str, target_id: str, session_id: Optional[str]) -> str:
+        """Gets the scored vector memory context block."""
         if not (self.memory_controller and hasattr(self.memory_controller, 'search_memory')):
             self.logger.debug(f"[{self._service_name}] Skipping vector memory - MemoryController or 'search_memory' unavailable.")
             return ""
         top_k_mem = self.config.get("mcs_vector_memory_top_k", 3)
         score_cutoff = self.config.get("mcs_vector_memory_cutoff", 0.70)
         try:
-            matches = self.memory_controller.search_memory(query_text=prompt, top_k=top_k_mem + 5, owner_id=target_id, session_id=session_id) # type: ignore
+            matches = self.memory_controller.search_memory(query_text=prompt, top_k=top_k_mem + 5, owner_id=target_id, session_id=session_id)
             if not matches: return ""
             relevant_memories = [m for m in matches if isinstance(m, dict) and m.get("score", 0.0) >= score_cutoff]
             if not relevant_memories: return ""
@@ -602,6 +643,7 @@ class MemoryContextService:
             self.logger.error(f"[{self._service_name}] Error getting scored vector memory: {e_vec_mem}", exc_info=True)
             return ""
     def _format_memory_snippet_for_prompt(self, memory_metadata: Dict[str, Any]) -> str:
+        """Formats a memory snippet for inclusion in a prompt."""
         if not memory_metadata: return ""
         parts = []
         ts = memory_metadata.get("timestamp_utc_stored_vss", memory_metadata.get("timestamp", "Time N/A"))
@@ -611,11 +653,12 @@ class MemoryContextService:
         if memory_metadata.get("ai_response_text"): parts.append(f" AI : {str(memory_metadata['ai_response_text'])[:150]}")
         if memory_metadata.get("text_content") and not (memory_metadata.get("user_interaction_text") or memory_metadata.get("ai_response_text")):
             parts.append(f" Note: {str(memory_metadata['text_content'])[:150]}")
-        tags = self._extract_tags_from_meta(memory_metadata) # Use helper
-        if tags : parts.append(f" Tags: {', '.join(tags[:5])}{'...' if len(tags) > 5 else ''}") # Show limited tags
+        tags = self._extract_tags_from_meta(memory_metadata)
+        if tags : parts.append(f" Tags: {', '.join(tags[:5])}{'...' if len(tags) > 5 else ''}")
         if "final_mcs_score" in memory_metadata: parts.append(f" Relevance Score: {memory_metadata['final_mcs_score']:.2f}")
         return "\n".join(parts)
     def _format_temporal_summary_block(self, recent_logs: List[Dict[str, Any]]) -> str:
+        """Formats a temporal summary block from recent logs."""
         if not recent_logs: return "\n# ⏳ Temporal Context: No recent specific logs found for this interaction stream.\n"
         log_count = len(recent_logs)
         header = f"\n# ⏳ Temporal Context (Last {log_count} Interactions):\n"
@@ -623,14 +666,16 @@ class MemoryContextService:
         return header + "\n---\n".join(snippets) + "\n"
     def _assemble_final_prompt(self, base_user_prompt: str, context_blocks: List[str],
                                 ai_agent_id: str, user_id: Optional[str]) -> str:
+        """Assembles the final prompt from the base prompt and context blocks."""
         template_str = self.config.get("mcs_prompt_template",
                                   "User Prompt:\n{user_prompt}\n\nSupplemental Context:\n{compiled_context_blocks}\n\nRespond as {ai_id}:")
         valid_blocks = [block for block in context_blocks if block and block.strip()]
-        compiled_block_str = "\n\n".join(valid_blocks) if valid_blocks else cds_constants_mcs.PLACEHOLDER_TEXT_EMPTY # type: ignore
+        compiled_block_str = "\n\n".join(valid_blocks) if valid_blocks else cds_constants_mcs.PLACEHOLDER_TEXT_EMPTY
         active_block_titles = [line.split('\n')[0].strip() for line in valid_blocks if line.strip().startswith("#")]
         self.logger.debug(f"[F956][CAPS:MCS_DEBUG] MCS: Assembling prompt. Active context block titles: {active_block_titles}")
         return template_str.format(user_prompt=base_user_prompt, compiled_context_blocks=compiled_block_str, ai_id=ai_agent_id, user_id_context=user_id or "GenericUser")
     def _log_event_to_file(self, event_data: Dict[str, Any], log_file_path: Optional[Path]):
+        """Logs an event to a file."""
         if not log_file_path: return
         try:
             event_data["event_type"] = "mcs_context_generated"
@@ -640,43 +685,47 @@ class MemoryContextService:
         except Exception as e_log_file:
             self.logger.error(f"[F956][CAPS:MCS_ERR] MCS: Failed to log event to {log_file_path}: {e_log_file}", exc_info=True)
     def _get_log_replay_context_block(self, prompt: str, target_id: str, session_id: Optional[str]) -> str:
+        """Gets a log replay context block based on keywords in the prompt."""
         if not (self.log_reader and hasattr(self.log_reader, 'search_logs_by_keyword')): return ""
         limit = self.config.get("mcs_log_replay_limit", 2)
         try:
-            logs = self.log_reader.search_logs_by_keyword(query_text=prompt, top_k=limit, target_id=target_id, session_id=session_id) # type: ignore
+            logs = self.log_reader.search_logs_by_keyword(query_text=prompt, top_k=limit, target_id=target_id, session_id=session_id)
             if not logs: return ""
             lines = [self._format_memory_snippet_for_prompt(log_entry) for log_entry in logs]
             return "\n# 📜 Log Replay (Prompt Keyword Context):\n" + "\n---\n".join(lines) + "\n"
         except Exception as e_log_replay: self.logger.error(f"[F956][CAPS:MCS_ERR] Error in _get_log_replay_context_block: {e_log_replay}"); return ""
     def _get_reflective_log_snippets_block(self, target_id: str, session_id: Optional[str]) -> str:
+        """Gets a block of recent reflective log snippets."""
         if not (self.log_reader and hasattr(self.log_reader, 'get_reflective_logs')): return ""
         limit = self.config.get("mcs_reflective_log_snippets_limit", 2)
         try:
-            logs = self.log_reader.get_reflective_logs(limit=limit, target_id=target_id, session_id=session_id) # type: ignore
+            logs = self.log_reader.get_reflective_logs(limit=limit, target_id=target_id, session_id=session_id)
             if not logs: return ""
             lines = [self._format_memory_snippet_for_prompt(log_entry) for log_entry in logs]
             return "\n# ✨ Recent Reflective Log Snippets:\n" + "\n---\n".join(lines) + "\n"
         except Exception as e_refl_log: self.logger.error(f"[F956][CAPS:MCS_ERR] Error in _get_reflective_log_snippets_block: {e_refl_log}"); return ""
     def _get_external_insights_summary_block(self, target_id: str) -> str:
+        """Gets a summary block of curated external insights."""
         if not (self.log_reader and hasattr(self.log_reader, 'get_curated_external_insights')): return ""
         limit = self.config.get("mcs_external_insights_limit", 1)
         try:
-            insights = self.log_reader.get_curated_external_insights(target_id=target_id, limit=limit) # type: ignore
+            insights = self.log_reader.get_curated_external_insights(target_id=target_id, limit=limit)
             if not insights: return ""
             lines = [f" - Insight ({entry.get('source_tool', 'External')} @ {str(entry.get('timestamp', ''))[:10]}): {str(entry.get('summary_text', 'N/A'))[:250]}"
                 for entry in insights if isinstance(entry, dict)]
             return "\n# 💎 Curated External Reflections/Insights:\n" + "\n".join(lines) + "\n" if lines else ""
         except Exception as e_ext_insight: self.logger.error(f"[F956][CAPS:MCS_ERR] Error in _get_external_insights_summary_block: {e_ext_insight}"); return ""
     def _get_log_keyword_context_block(self, keywords: List[str], target_id: str, session_id: Optional[str]) -> str:
+        """Gets a context block based on keywords found in logs."""
         if not keywords or not (self.log_reader and hasattr(self.log_reader, 'get_log_entries_by_keywords_list')): return ""
         limit_per_kw = self.config.get("mcs_log_keyword_context_limit_per_kw", 1)
         total_limit = self.config.get("mcs_log_keyword_context_total_limit", 3)
         all_entries_map: Dict[str, Dict[str, Any]] = {}
         try:
-            entries = self.log_reader.get_log_entries_by_keywords_list(keywords_list=keywords, top_k_per_keyword=limit_per_kw, target_id=target_id, session_id=session_id) # type: ignore
+            entries = self.log_reader.get_log_entries_by_keywords_list(keywords_list=keywords, top_k_per_keyword=limit_per_kw, target_id=target_id, session_id=session_id)
             if entries:
                 for le in entries:
-                    fp = le.get("fingerprint", le.get("uuid", cmn_generate_short_uuid_mcs(8))) # type: ignore
+                    fp = le.get("fingerprint", le.get("uuid", cmn_generate_short_uuid_mcs(8)))
                     all_entries_map[fp] = le
             if not all_entries_map: return ""
             sorted_entries = sorted(all_entries_map.values(), key=lambda x: x.get("timestamp", ""), reverse=True)
@@ -684,6 +733,7 @@ class MemoryContextService:
             return "\n# 🔑 Keyword Triggered Log Context:\n" + "\n---\n".join(lines) + "\n" if lines else ""
         except Exception as e_kw_log: self.logger.error(f"[F956][CAPS:MCS_ERR] Error in _get_log_keyword_context_block: {e_kw_log}"); return ""
     def _match_themes_from_text_internal(self, text: str) -> List[str]:
+        """Matches themes from text based on internal keywords."""
         if not text or not isinstance(text, str): return []
         matches = set()
         lowered_text = text.lower()
@@ -691,6 +741,7 @@ class MemoryContextService:
             if any(kw in lowered_text for kw in keywords): matches.add(theme)
         return list(matches)
     def _analyze_streak_domains_internal(self, logs: List[Dict[str,Any]]) -> List[str]:
+        """Analyzes a streak of domains from a list of logs."""
         if not logs: return []
         theme_counter: Dict[str, int] = defaultdict(int)
         for log_entry in logs:
@@ -700,11 +751,13 @@ class MemoryContextService:
         sorted_themes = sorted(theme_counter.items(), key=lambda item: item[1], reverse=True)
         return [theme[0] for theme in sorted_themes[:self.config.get("mcs_streak_domain_count", 3)]]
     def _summarize_text_focus(self, text_blob: str, title_prefix="Thematic Focus") -> str:
+        """Summarizes the thematic focus of a text blob."""
         if not text_blob: return ""
         themes = self._match_themes_from_text_internal(text_blob)
         if not themes: return f"\n# {title_prefix}: Varied topics, no single dominant theme detected from recent text.\n"
         return f"\n# {title_prefix}: Recent interactions appear to focus on: {', '.join(themes)}.\n"
     def _extract_tags_from_meta(self, metadata: Dict[str, Any]) -> List[str]:
+        """Extracts tags from a metadata dictionary."""
         tags_out: Set[str] = set()
         raw_tags_fields = [metadata.get("tags_list"), metadata.get("tags"), metadata.get("keywords")]
         for raw_tags_item in raw_tags_fields:
@@ -713,16 +766,45 @@ class MemoryContextService:
         return list(tags_out)
     # --- Public API methods ---
     def is_text_growth_related(self, text: str) -> bool:
+        """
+        Checks if a text is related to growth based on internal keywords.
+
+        Args:
+            text (str): The text to check.
+
+        Returns:
+            bool: True if the text is growth-related, False otherwise.
+        """
         if not self.is_ready(): self.logger.warning(f"[{self._service_name}] is_text_growth_related called when not ready."); return False
         if not text or not isinstance(text, str): return False
         text_lower = text.lower()
         return any(seed_keyword in text_lower for seed_keyword in self.growth_keywords)
     def get_curiosity_question_text(self, domain_hint: Optional[str] = None) -> str:
+        """
+        Gets a curiosity-driven question based on a domain hint.
+
+        Args:
+            domain_hint (Optional[str], optional): A hint for the domain of the
+                question. Defaults to None.
+
+        Returns:
+            str: A curiosity-driven question.
+        """
         if not self.is_ready(): self.logger.warning(f"[{self._service_name}] get_curiosity_question_text called when not ready."); return "Is the system ready for questions?"
         effective_domain = domain_hint or self.config.get("mcs_curiosity_default_domain", "growth")
-        seed_options = self.curiosity_seeds.get(effective_domain, DEFAULT_MCS_CURIOSITY_SEEDS_INTERNAL.get("growth", ["What new connections can be made?"])) # type: ignore
+        seed_options = self.curiosity_seeds.get(effective_domain, DEFAULT_MCS_CURIOSITY_SEEDS_INTERNAL.get("growth", ["What new connections can be made?"]))
         return random.choice(seed_options)
     def inject_ai_specific_external_reflection(self, reflection_data: Dict[str, Any], target_id: str) -> bool:
+        """
+        Injects an external reflection into the system.
+
+        Args:
+            reflection_data (Dict[str, Any]): The reflection data to inject.
+            target_id (str): The ID of the target for the reflection.
+
+        Returns:
+            bool: True if the injection was successful, False otherwise.
+        """
         if not self.is_ready(): self.logger.error(f"[{self._service_name}] Cannot inject reflection, service not ready."); return False
         if not self.ext_reflection_log_path:
             self.logger.error(f"[{self._service_name}] Cannot inject external reflection, operational log path not configured.")
@@ -733,11 +815,10 @@ class MemoryContextService:
             "reflection_source": reflection_data.get("source_system", "unknown_external_source"),
             "reflection_summary": str(reflection_data.get("summary", str(reflection_data.get("text_content", ""))))[:300],
             "ingest_timestamp": self._current_utc_iso(),
-            "full_data_preview": {k: str(v)[:70] for k,v in list(reflection_data.items())[:5]}, # Preview first 5 items
+            "full_data_preview": {k: str(v)[:70] for k,v in list(reflection_data.items())[:5]},
         }
         if self.enable_file_logging: self._log_event_to_file(event_to_log, self.ext_reflection_log_path)
         self.logger.info(f"[{self._service_name}] External reflection for '{target_id}' from '{event_to_log['reflection_source']}' logged.")
-        # Future: self.memory_controller.add_external_reflection(target_id, reflection_data) # Requires MC to exist
         if self.forward_to_memory_controller and self.memory_controller and hasattr(self.memory_controller, 'add_external_reflection'):
             try:
                 self.memory_controller.add_external_reflection(reflection_data, target_id)
@@ -747,6 +828,17 @@ class MemoryContextService:
                 return False
         return True
     def process_batch_external_reflections(self, reflections_batch: List[Dict[str, Any]], target_id: str) -> Tuple[int, int]:
+        """
+        Processes a batch of external reflections.
+
+        Args:
+            reflections_batch (List[Dict[str, Any]]): A list of reflection data
+                dictionaries.
+            target_id (str): The ID of the target for the reflections.
+
+        Returns:
+            A tuple containing the number of successful and failed injections.
+        """
         if not self.is_ready(): self.logger.error(f"[{self._service_name}] Cannot process batch reflections, service not ready."); return (0, len(reflections_batch))
         success_count = 0; fail_count = 0
         for reflection_item in reflections_batch:
@@ -756,12 +848,28 @@ class MemoryContextService:
         return success_count, fail_count
       
     def get_enriched_context_basic(self, query_text: str, target_id: Optional[str] = None, top_k_faiss: int = 1) -> Dict[str, Any]:
+        """
+        Gets a basic enriched context for a query.
+
+        This method performs a quick search in the memory and anchor stores to
+        provide a basic level of context enrichment.
+
+        Args:
+            query_text (str): The query text.
+            target_id (Optional[str], optional): The ID of the target.
+                Defaults to None.
+            top_k_faiss (int, optional): The number of FAISS results to consider.
+                Defaults to 1.
+
+        Returns:
+            A dictionary of enriched context data.
+        """
         if not self.is_ready(): self.logger.warning(f"[{self._service_name}] get_enriched_context_basic called when not ready."); return {"tags": [], "timestamp": None, "reflection_index": 0.0, "source": "error_mcs_not_ready"}
         if not query_text or not isinstance(query_text, str):
             self.logger.warning(f"[{self._service_name}] get_enriched_context_basic: Invalid query_text."); return {"tags": [], "timestamp": None, "reflection_index": 0.0, "source": "error_no_query"}
         faiss_hits = []
         if self.memory_controller and hasattr(self.memory_controller, 'search_memory'):
-            try: faiss_hits = self.memory_controller.search_memory(query_text=query_text, top_k=top_k_faiss, owner_id=target_id) # type: ignore
+            try: faiss_hits = self.memory_controller.search_memory(query_text=query_text, top_k=top_k_faiss, owner_id=target_id)
             except Exception as e_mc_search: self.logger.error(f"[F956][CAPS:MCS_ERR] Error calling MC search_memory: {e_mc_search}"); faiss_hits = []
         if faiss_hits and isinstance(faiss_hits, list) and faiss_hits[0].get("score", 0.0) > self.config.get("mcs_enrich_min_score", 0.7):
             top_hit_meta = faiss_hits[0].get("metadata", {})
@@ -774,13 +882,13 @@ class MemoryContextService:
             return {"tags": list(set(tags)), "timestamp": ts, "reflection_index": reflection, "source": "faiss_vector_match"}
         if self.memory_controller and hasattr(self.memory_controller, 'get_anchor'):
             try:
-                anchor_val = self.memory_controller.get_anchor(query_text.lower().strip().replace(" ", "_"), owner_id=target_id) # type: ignore
+                anchor_val = self.memory_controller.get_anchor(query_text.lower().strip().replace(" ", "_"), owner_id=target_id)
                 if anchor_val: return {"tags": ["anchor_direct"], "timestamp": self._current_utc_iso(), "reflection_index": 0.95, "source": "anchor_direct_hit", "value": anchor_val}
             except Exception as e_mc_anchor: self.logger.error(f"[F956][CAPS:MCS_ERR] Error calling MC get_anchor: {e_mc_anchor}")
         if self.memory_controller and hasattr(self.memory_controller, 'search_anchors'):
             try:
-                anchor_search_hits = self.memory_controller.search_anchors(query_text, owner_id=target_id, top_k=1) # type: ignore
-                if anchor_search_hits and isinstance(anchor_search_hits, list) and anchor_search_hits[0]: # Check if list is not empty
+                anchor_search_hits = self.memory_controller.search_anchors(query_text, owner_id=target_id, top_k=1)
+                if anchor_search_hits and isinstance(anchor_search_hits, list) and anchor_search_hits[0]:
                     top_anchor_meta = anchor_search_hits[0].get("metadata", {})
                     return {"tags": ["anchor_search", top_anchor_meta.get("key", "unknown_anchor")], "timestamp": top_anchor_meta.get("timestamp"), "reflection_index": 0.9, "source": "anchor_search_hit"}
             except Exception as e_mc_search_anchor: self.logger.error(f"[F956][CAPS:MCS_ERR] Error calling MC search_anchors: {e_mc_search_anchor}")

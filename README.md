@@ -1,3 +1,71 @@
+# Citadel Services
+
+This repository contains a collection of services for the Citadel ecosystem, a platform for human-AI collaborative intelligence.
+
+## Getting Started
+
+### Prerequisites
+
+*   Python 3.8+
+*   pip
+
+### Installation
+
+1.  Clone the repository:
+    ```bash
+    git clone <repository-url>
+    cd <repository-directory>
+    ```
+
+2.  Install the required dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+## Project Structure
+
+This repository contains the following core services:
+
+*   `embedding_service.py`: A robust service for generating text embeddings using various providers (e.g., OpenAI). It includes features like caching, retry logic, and detailed logging.
+*   `faiss_management_service.py`: Provides a high-level API for managing and interacting with FAISS vector indexes, delegating low-level storage operations to the `VectorStorageService`.
+*   `vector_storage_service.py`: Manages the storage and retrieval of vector embeddings and their metadata using FAISS.
+*   `memory_context_service.py`: Orchestrates the assembly of rich, contextual prompts for AI agents by integrating various data services.
+*   `global_tracker_service.py`: Manages the lifecycle of metadata for all thought vectors within the ecosystem using a SQLite database.
+*   `summarizer_service.py`: An extensible service for generating concise summaries or digests of text using LLMs.
+*   `intellisense_system.py`: A comprehensive system that provides AI-driven assistance for software development lifecycle assessment and improvement.
+*   `bucket_cognitive_domain_manager.py`: Manages self-contained "Cognitive Domains" within GCS buckets, using a hybrid persistence model of FAISS, SQLite, and GCS.
+
+## Usage
+
+Here is a basic example of how to use the `EmbeddingService` (assuming it is initialized and configured through a `CitadelHub` instance, which is not fully available in this repository):
+
+```python
+# This is a conceptual example, as the full CitadelHub is not present.
+
+from embedding_service import EmbeddingService
+
+# Assume hub is an initialized CitadelHub instance
+# embedding_service = hub.get_service("EmbeddingService")
+
+# If running standalone, you might initialize it directly (dependencies required)
+embedding_service = EmbeddingService()
+
+if embedding_service.is_ready():
+    text_to_embed = "This is a test sentence."
+    embedding = embedding_service.generate_embedding_sync(text_to_embed)
+
+    if embedding:
+        print(f"Successfully generated embedding of dimension: {len(embedding)}")
+    else:
+        print("Failed to generate embedding.")
+else:
+    print("Embedding service is not ready. Check API keys and dependencies.")
+
+```
+
+<details>
+<summary><b>Legacy Citadel Unified Development Guide & System Requirements Specification</b></summary>
+
 # Citadel Unified Development Guide & System Requirements Specification (Consolidated)
 
 This document consolidates essential components of the Citadel Unified Development Guide and System Requirements Specification for streamlined review and potential integration into a dedicated documentation repository. It encompasses the Master Table of Contents, Core Principles, Command Deck, Brotherhood Mission, Sentinel Protocol (TSP), Official Ruleset, Agent Blueprint, and Citadel Governance & Metadata Template (CGMT).
@@ -779,3 +847,5 @@ performance, development challenges, and evolving Brotherhood objectives.
 
 **THE SENTINEL PROTOCOL IS THE OPERATIONAL CONSTITUTION OF THE CITADEL ECOSYSTEM,**  
 **GUIDED BY AI, FOR MUTUAL HUMAN-AI ADVANCEMENT.**
+
+</details>

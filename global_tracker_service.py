@@ -177,6 +177,21 @@ FIELD_TABLE = "vector_metadata_fields"  # For dynamic key-value pairs
 
 
 class GlobalMetadataTracker:
+    """
+    Manages the lifecycle of metadata for all thought vectors in the ecosystem.
+
+    This service provides a schema-aware interface to a SQLite database,
+    separating core, schema-defined metadata from flexible, dynamic key-value
+    fields. It handles database connections, schema evolution, and data
+    serialization.
+
+    Attributes:
+        VERSION (str): The version of the service.
+        SCHEMA_DEFINED_FIELDS (List[str]): A list of fields defined in the core schema.
+        FIELD_EXPLANATIONS (Dict[str, str]): Explanations for schema fields.
+        db_path (Optional[str]): The path to the SQLite database file.
+        hub (Optional[Any]): A reference to the CitadelHub instance.
+    """
     VERSION = "3.0"
     
     # Static list of fields from the loaded GLOBAL_TRACKING_SCHEMA
@@ -212,12 +227,19 @@ class GlobalMetadataTracker:
                  system_config: Optional[Any] = None,   # Deprecated, kept for legacy compatibility if needed
                  hub_instance: Optional[Any] = None):
         """
-        Initializes the GlobalMetadataTracker service. Adheres to GPCS-P.
+        Initializes the GlobalMetadataTracker service.
+
+        This adheres to the GPCS-P (Global Path and Configuration Sourcing
+        Protocol) by prioritizing the `hub_instance` for configuration and path
+        sourcing.
 
         Args:
-            db_path: Deprecated. Highest precedence override for the DB path, mainly for testing.
-            system_config: Deprecated. Use hub_instance.
-            hub_instance: Required reference to the CitadelHub instance for config and path sourcing.
+            db_path (Optional[Union[str, Path]], optional): Deprecated. A direct
+                path to the database, used for testing. Defaults to None.
+            system_config (Optional[Any], optional): Deprecated. Use `hub_instance`.
+                Defaults to None.
+            hub_instance (Optional[Any], optional): A reference to the CitadelHub
+                instance. Required for normal operation. Defaults to None.
         """
         # --- 1. Initialize instance variables ---
         self.hub = hub_instance
@@ -295,12 +317,16 @@ class GlobalMetadataTracker:
 
     def is_ready(self) -> bool:
         """
-        Reports the operational readiness of the GlobalMetadataTracker instance.
-        True if the database connection is established and tables/schema are verified.
+        Reports the operational readiness of the GlobalMetadataTracker.
+
+        Returns:
+            bool: True if the database connection is established and the schema
+                is verified, False otherwise.
         """
         return self._is_ready
 
     def _connect_db(self):
+        """Establishes a connection to the SQLite database."""
         if self.conn:
             try: self.conn.close()
             except Exception as e_close: logger.warning(f"[F956][CAPS:GLOBAL_TRACKER_WARN] GMT: Error closing existing DB connection: {e_close}")
@@ -313,6 +339,15 @@ class GlobalMetadataTracker:
         logger.debug(f"[F956][CAPS:GLOBAL_TRACKER_DEBUG] GMT: DB connection established to '{self.db_path}'.")
 
     def _get_cursor(self) -> sqlite3.Cursor:
+        """
+        Gets a valid database cursor, reconnecting if necessary.
+
+        Raises:
+            sqlite3.OperationalError: If a valid cursor cannot be obtained.
+
+        Returns:
+            sqlite3.Cursor: An active database cursor.
+        """
         if self.conn is None or self.cursor is None:
             logger.warning("[F956][CAPS:GLOBAL_TRACKER_WARN] GMT: DB connection or cursor is None. Re-attempting connection.")
             self._connect_db()
@@ -326,6 +361,9 @@ class GlobalMetadataTracker:
         return self.cursor
 
     def ensure_tables_and_schema(self):
+        """
+        Ensures that the necessary database tables exist and their schema is up to date.
+        """
         cursor = self._get_cursor()
         # --- Ensure MAIN_TABLE (global_vector_metadata) ---
         if not GLOBAL_TRACKING_SCHEMA or "fingerprint" not in GLOBAL_TRACKING_SCHEMA:
@@ -410,6 +448,16 @@ class GlobalMetadataTracker:
         return str(value) # Default: store as string
 
     def insert_new_vector(self, fingerprint: str, initial_data: Optional[Dict[str, Any]] = None):
+        """
+        Inserts a new vector record into the main metadata table.
+
+        If the fingerprint already exists, the operation is ignored.
+
+        Args:
+            fingerprint (str): The unique identifier for the vector.
+            initial_data (Optional[Dict[str, Any]], optional): A dictionary of
+                initial metadata to store. Defaults to None.
+        """
         if not fingerprint or not isinstance(fingerprint, str):
             logger.error("[F956][CAPS:GLOBAL_TRACKER_ERR] GMT: insert_new_vector requires a non-empty string fingerprint."); return
         
@@ -481,6 +529,17 @@ class GlobalMetadataTracker:
 
 
     def bulk_update_fields(self, fingerprint: str, field_value_dict: Dict[str, Any]):
+        """
+        Updates multiple metadata fields for a vector in a single transaction.
+
+        This method intelligently separates fields into schema-defined and
+        dynamic fields, updating the appropriate tables.
+
+        Args:
+            fingerprint (str): The unique identifier of the vector to update.
+            field_value_dict (Dict[str, Any]): A dictionary of fields and their
+                new values.
+        """
         if not fingerprint or not isinstance(fingerprint, str):
             logger.error("[F956][CAPS:GLOBAL_TRACKER_ERR] GMT: bulk_update_fields requires a valid fingerprint string."); return
         if not field_value_dict or not isinstance(field_value_dict, dict):
@@ -569,6 +628,23 @@ class GlobalMetadataTracker:
 
 
     def get_metadata(self, fingerprint: str, include_dynamic_fields: bool = True, use_cache: bool = False) -> Dict[str, Any]:
+        """
+        Retrieves all metadata for a given vector fingerprint.
+
+        This method fetches both schema-defined and dynamic fields, and correctly
+        deserializes complex types like JSON strings and booleans.
+
+        Args:
+            fingerprint (str): The unique identifier of the vector.
+            include_dynamic_fields (bool, optional): Whether to include dynamic
+                fields from the secondary table. Defaults to True.
+            use_cache (bool, optional): Whether to use the in-memory cache.
+                Defaults to False.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing all metadata for the vector.
+                Returns an empty dictionary if the fingerprint is not found.
+        """
         if not fingerprint: 
             logger.warning("[F956][CAPS:GLOBAL_TRACKER_WARN] GMT: get_metadata called with empty fingerprint.")
             return {}
@@ -665,6 +741,12 @@ class GlobalMetadataTracker:
     #     and the aligned `field_name` convention for the dynamic fields table.
 
     def print_metadata_summary(self, fingerprint: str):
+        """
+        Prints a formatted summary of a vector's metadata to the logger.
+
+        Args:
+            fingerprint (str): The unique identifier of the vector.
+        """
         logger.info(f"\n[F956][CAPS:GLOBAL_TRACKER_INFO] 📌 METADATA SUMMARY — Fingerprint: {fingerprint}")
         meta = self.get_metadata(fingerprint, include_dynamic_fields=True, use_cache=True) # Use cache for efficiency
         if not meta: logger.info("[F956][CAPS:GLOBAL_TRACKER_INFO]   ⚠️ No metadata found for this fingerprint."); return
@@ -689,6 +771,20 @@ class GlobalMetadataTracker:
             logger.info("[F956][CAPS:GLOBAL_TRACKER_INFO]   No dynamic fields found for this fingerprint.")
 
     def build(self, fingerprint: str, raw_text: str, agent_profile: Optional[Dict]=None, context: Optional[str]=None) -> Dict[str, Any]:
+        """
+        A helper method to construct and insert a new vector's metadata.
+
+        Args:
+            fingerprint (str): The unique identifier for the new vector.
+            raw_text (str): The raw text content of the vector.
+            agent_profile (Optional[Dict], optional): A dictionary containing
+                agent-specific profile information. Defaults to None.
+            context (Optional[str], optional): The context in which the vector
+                was created. Defaults to None.
+
+        Returns:
+            Dict[str, Any]: The complete metadata for the newly created vector.
+        """
         # (Similar to your v2.6, but ensure keys match GLOBAL_TRACKING_SCHEMA)
         now_iso = datetime.now(timezone.utc).isoformat()
         agent_profile = agent_profile or {}
@@ -719,19 +815,47 @@ class GlobalMetadataTracker:
         return self.get_metadata(fingerprint)
 
     def explain_field(self, field_name: str) -> str:
+        """
+        Provides an explanation for a given schema field.
+
+        Args:
+            field_name (str): The name of the field to explain.
+
+        Returns:
+            str: An explanation of the field.
+        """
         return self.FIELD_EXPLANATIONS.get(field_name, f"[F956][CAPS:GLOBAL_TRACKER_INFO] No specific explanation available for field '{field_name}'.")
 
-    def get_unknown_fields_encountered(self) -> List[str]: # Renamed from get_unknown_fields
+    def get_unknown_fields_encountered(self) -> List[str]:
+        """
+        Returns a list of dynamic field names encountered during the service's lifetime.
+
+        Returns:
+            List[str]: A sorted list of unknown field names.
+        """
         return sorted(list(self.unknown_fields_encountered))
 
     def get_missing_schema_fields_from_db(self) -> List[str]:
-        """Compares GLOBAL_TRACKING_SCHEMA keys with actual columns in the main DB table."""
+        """
+        Compares the current schema with the database table to find missing columns.
+
+        Returns:
+            List[str]: A list of schema fields that are not present in the
+                database table.
+        """
         cursor = self._get_cursor()
         cursor.execute(f"PRAGMA table_info(`{MAIN_TABLE}`)")
         existing_db_cols = {row["name"].lower() for row in cursor.fetchall()} # case-insensitive check
         return [f_schema for f_schema in GLOBAL_TRACKING_SCHEMA.keys() if f_schema.lower() not in existing_db_cols]
 
-    def rebuild_dynamic_field_table(self, confirm_destructive: bool = False): # Renamed for clarity
+    def rebuild_dynamic_field_table(self, confirm_destructive: bool = False):
+        """
+        Destructively drops and rebuilds the dynamic field table.
+
+        Args:
+            confirm_destructive (bool, optional): Must be set to True to execute.
+                Defaults to False.
+        """
         if not confirm_destructive:
             logger.error(f"[F956][CAPS:GLOBAL_TRACKER_ERR] GMT: Rebuild of `{FIELD_TABLE}` is DESTRUCTIVE and requires confirm_destructive=True. Aborted.")
             return
@@ -752,6 +876,7 @@ class GlobalMetadataTracker:
 
 
     def close(self):
+        """Closes the database connection."""
         if self.conn:
             try: self.conn.close(); logger.info(f"[F956][CAPS:GLOBAL_TRACKER_INFO] GMT: DB connection to '{self.db_path}' closed.")
             except sqlite3.Error as e: logger.error(f"[F956][CAPS:GLOBAL_TRACKER_ERR] GMT: Error closing DB connection: {e}")
