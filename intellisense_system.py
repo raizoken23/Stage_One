@@ -231,34 +231,61 @@ except ImportError:
   logger.warning("openai not found. OpenAI API calls disabled.")
 
 class BaseEmbeddingProvider(ABC):
-  @abstractmethod
-  def get_embedding(self, text: str) -> Optional[List[float]]:
-    pass
+    """Abstract base class for embedding providers."""
+    @abstractmethod
+    def get_embedding(self, text: str) -> Optional[List[float]]:
+        """
+        Generates an embedding for the given text.
+
+        Args:
+            text (str): The text to embed.
+
+        Returns:
+            Optional[List[float]]: The embedding vector, or None on failure.
+        """
+        pass
 
 class LocalEmbeddingProvider(BaseEmbeddingProvider):
-  def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-    self.model_name = model_name
-    self.model: Optional[SentenceTransformer] = None
-    if SentenceTransformer:
-      try:
-        with CaptureStdoutStderr():
-          self.model = SentenceTransformer(model_name)
-        logger.info(f"LocalEmbeddingProvider initialized with model '{model_name}'.")
-      except Exception as e:
-        logger.error(f"Failed to load local embedding model '{model_name}': {e}")
-    else:
-      logger.warning("LocalEmbeddingProvider not active. sentence_transformers library not found.")
+    """An embedding provider that uses a local SentenceTransformer model."""
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        """
+        Initializes the LocalEmbeddingProvider.
 
-  def get_embedding(self, text: str) -> Optional[List[float]]:
-    if self.model is None or not text:
-      logger.debug("Local embedding model not loaded or text is empty.") # Model can be None if SentenceTransformer fails
-      return None
-    try:
-      embedding = self.model.encode(str(text), convert_to_tensor=False).tolist() # type: ignore
-      return embedding
-    except Exception as e:
-      logger.error(f"Failed to get local embedding for text '{text[:50]}...': {e}")
-      return None
+        Args:
+            model_name (str, optional): The name of the SentenceTransformer model
+                to use. Defaults to "all-MiniLM-L6-v2".
+        """
+        self.model_name = model_name
+        self.model: Optional[SentenceTransformer] = None
+        if SentenceTransformer:
+            try:
+                with CaptureStdoutStderr():
+                    self.model = SentenceTransformer(model_name)
+                logger.info(f"LocalEmbeddingProvider initialized with model '{model_name}'.")
+            except Exception as e:
+                logger.error(f"Failed to load local embedding model '{model_name}': {e}")
+        else:
+            logger.warning("LocalEmbeddingProvider not active. sentence_transformers library not found.")
+
+    def get_embedding(self, text: str) -> Optional[List[float]]:
+        """
+        Generates an embedding for the given text using the local model.
+
+        Args:
+            text (str): The text to embed.
+
+        Returns:
+            Optional[List[float]]: The embedding vector, or None on failure.
+        """
+        if self.model is None or not text:
+            logger.debug("Local embedding model not loaded or text is empty.")
+            return None
+        try:
+            embedding = self.model.encode(str(text), convert_to_tensor=False).tolist()
+            return embedding
+        except Exception as e:
+            logger.error(f"Failed to get local embedding for text '{text[:50]}...': {e}")
+            return None
 
 class CaptureStdoutStderr:
   """Context manager to suppress stdout and stderr."""
@@ -277,315 +304,482 @@ class CaptureStdoutStderr:
 
 # MemoriaModule (Base Class)
 class MemoriaModule(ABC):
-  def __init__(self):
-    self._invocations = 0
-    self._successful_invocations = 0
-    self._total_latency = 0.0
+    """Abstract base class for all Memoria modules."""
+    def __init__(self):
+        """Initializes the module's operational metrics."""
+        self._invocations = 0
+        self._successful_invocations = 0
+        self._total_latency = 0.0
 
-  @abstractmethod
-  def initialize(self, config: Dict[str, Any]) -> None:
-    pass
+    @abstractmethod
+    def initialize(self, config: Dict[str, Any]) -> None:
+        """
+        Initializes the module with the given configuration.
+
+        Args:
+            config (Dict[str, Any]): The configuration for the module.
+        """
+        pass
   
-  @abstractmethod
-  def health_check(self) -> bool:
-    pass
+    @abstractmethod
+    def health_check(self) -> bool:
+        """
+        Performs a health check on the module.
 
-  def _start_op(self):
-    self._invocations += 1
-    return time.perf_counter()
+        Returns:
+            bool: True if the module is healthy, False otherwise.
+        """
+        pass
 
-  def _end_op(self, start_time: float, success: bool = True):
-    latency = time.perf_counter() - start_time
-    self._total_latency += latency
-    if success:
-      self._successful_invocations += 1
+    def _start_op(self):
+        """Marks the start of an operation for metric tracking."""
+        self._invocations += 1
+        return time.perf_counter()
 
-  def get_operational_metrics(self) -> Dict[str, Any]:
-    success_rate = (self._successful_invocations / self._invocations) if self._invocations > 0 else 0.0
-    avg_latency_ms = (self._total_latency / self._invocations * 1000) if self._invocations > 0 else 0.0
-    return {
-      "invocations": self._invocations,
-      "success_count": self._successful_invocations,
-      "error_count": self._invocations - self._successful_invocations,
-      "success_rate": round(success_rate, 4),
-      "avg_latency_ms": round(avg_latency_ms, 2)
-    }
+    def _end_op(self, start_time: float, success: bool = True):
+        """Marks the end of an operation for metric tracking."""
+        latency = time.perf_counter() - start_time
+        self._total_latency += latency
+        if success:
+            self._successful_invocations += 1
+
+    def get_operational_metrics(self) -> Dict[str, Any]:
+        """
+        Gets the operational metrics for the module.
+
+        Returns:
+            Dict[str, Any]: A dictionary of operational metrics.
+        """
+        success_rate = (self._successful_invocations / self._invocations) if self._invocations > 0 else 0.0
+        avg_latency_ms = (self._total_latency / self._invocations * 1000) if self._invocations > 0 else 0.0
+        return {
+            "invocations": self._invocations,
+            "success_count": self._successful_invocations,
+            "error_count": self._invocations - self._successful_invocations,
+            "success_rate": round(success_rate, 4),
+            "avg_latency_ms": round(avg_latency_ms, 2)
+        }
 
 # MemoriaSelfReflection
 class MemoriaSelfReflection(MemoriaModule):
-  def __init__(self, config: Dict[str, Any], feedback_log_path: str = 'ecosystem/memoria/feedback.jsonl'):
-    super().__init__()
-    self.config = config
-    self.feedback_log_path = Path(feedback_log_path)
-    self_reflection_config = config.get('modules', {}).get('self_reflection', {})
-    self.reflection_interval = self_reflection_config.get('reflection_interval', 10)
-    self.interaction_count = 0
-    logger.info("MemoriaSelfReflection initialized.")
+    """A Memoria module for self-reflection and performance analysis."""
+    def __init__(self, config: Dict[str, Any], feedback_log_path: str = 'ecosystem/memoria/feedback.jsonl'):
+        """
+        Initializes the MemoriaSelfReflection module.
 
-  def initialize(self, config: Dict[str, Any]) -> None:
-    self.config.update(config)
-    self.feedback_log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("MemoriaSelfReflection initialization complete.")
+        Args:
+            config (Dict[str, Any]): The configuration for the module.
+            feedback_log_path (str, optional): The path to the feedback log file.
+                Defaults to 'ecosystem/memoria/feedback.jsonl'.
+        """
+        super().__init__()
+        self.config = config
+        self.feedback_log_path = Path(feedback_log_path)
+        self_reflection_config = config.get('modules', {}).get('self_reflection', {})
+        self.reflection_interval = self_reflection_config.get('reflection_interval', 10)
+        self.interaction_count = 0
+        logger.info("MemoriaSelfReflection initialized.")
 
-  def health_check(self) -> bool:
-    return self.feedback_log_path.parent.exists()
+    def initialize(self, config: Dict[str, Any]) -> None:
+        """
+        Initializes the module with the given configuration.
 
-  def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
-    start_time = self._start_op()
-    try:
-      self.interaction_count += 1
-      if self.interaction_count % self.reflection_interval == 0:
-        result = self.reflect(request)
-      else:
-        result = {"status": "skipped", "message": "Reflection not triggered."}
-      self._end_op(start_time, success=True)
-      return result
-    except Exception as e:
-      self._end_op(start_time, success=False)
-      raise e
+        Args:
+            config (Dict[str, Any]): The configuration for the module.
+        """
+        self.config.update(config)
+        self.feedback_log_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info("MemoriaSelfReflection initialization complete.")
 
-  def reflect(self, request: Dict[str, Any]) -> Dict[str, Any]:
-    feedback_data = self._load_feedback()
-    analysis_result = request.get('analysis_result', {})
-    try:
-      # Ensure numpy is used for mean, handle empty feedback_data
-      avg_performance = np.mean([f.get('performance_score', 0.0) for f in feedback_data]) if feedback_data else 0.0
-      optimization_suggestions = analysis_result.get('optimization_suggestions', [])
-      reflection_output = {
-        "status": "success",
-        "avg_performance": avg_performance,
-        "suggestions_applied": len(optimization_suggestions),
-        "timestamp": datetime.now(timezone.utc).isoformat()
-      }
-      if optimization_suggestions:
-        self._apply_optimizations(optimization_suggestions)
-      self._log_reflection(reflection_output)
-      return reflection_output
-    except Exception as e:
-      logger.error(f"Reflection failed: {e}")
-      return {"status": "failure", "error": str(e)}
+    def health_check(self) -> bool:
+        """
+        Performs a health check on the module.
 
-  def _load_feedback(self) -> List[Dict[str, Any]]:
-    feedback_data = [] # Changed from self.feedback_data to local variable as it was not initialized
-    if self.feedback_log_path.exists():
-      with open(self.feedback_log_path, 'r', encoding='utf-8') as f:
-        for line in f:
-          try:
-            feedback_data.append(json.loads(line.strip()))
-          except json.JSONDecodeError:
-            logger.warning(f"Skipping malformed JSON line in feedback log: {line.strip()[:100]}...")
-            continue
-    return feedback_data
+        Returns:
+            bool: True if the module is healthy, False otherwise.
+        """
+        return self.feedback_log_path.parent.exists()
 
-  def _apply_optimizations(self, suggestions: List[str]):
-    for suggestion in suggestions:
-      if "increase_reflection_interval" in suggestion:
-        # Access config directly for changes
-        if 'modules' not in self.config: self.config['modules'] = {}
-        if 'self_reflection' not in self.config['modules']: self.config['modules']['self_reflection'] = {}
-        self.config['modules']['self_reflection']['reflection_interval'] = \
-          self.config['modules']['self_reflection'].get('reflection_interval', 10) + 5
-        logger.info("Increased reflection interval based on optimization suggestion.")
+    def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Processes a request, triggering reflection if the interval is met.
 
-  def _log_reflection(self, reflection_output: Dict[str, Any]):
-    with open(self.feedback_log_path, 'a', encoding='utf-8') as f:
-      json.dump(reflection_output, f)
-      f.write('\n')
-    logger.info("Logged reflection output.")
+        Args:
+            request (Dict[str, Any]): The request to process.
+
+        Returns:
+            Dict[str, Any]: The result of the reflection process.
+        """
+        start_time = self._start_op()
+        try:
+            self.interaction_count += 1
+            if self.interaction_count % self.reflection_interval == 0:
+                result = self.reflect(request)
+            else:
+                result = {"status": "skipped", "message": "Reflection not triggered."}
+            self._end_op(start_time, success=True)
+            return result
+        except Exception as e:
+            self._end_op(start_time, success=False)
+            raise e
+
+    def reflect(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Performs a reflection cycle based on feedback and analysis results.
+
+        Args:
+            request (Dict[str, Any]): The request containing analysis results.
+
+        Returns:
+            Dict[str, Any]: The output of the reflection.
+        """
+        feedback_data = self._load_feedback()
+        analysis_result = request.get('analysis_result', {})
+        try:
+            # Ensure numpy is used for mean, handle empty feedback_data
+            avg_performance = np.mean([f.get('performance_score', 0.0) for f in feedback_data]) if feedback_data else 0.0
+            optimization_suggestions = analysis_result.get('optimization_suggestions', [])
+            reflection_output = {
+                "status": "success",
+                "avg_performance": avg_performance,
+                "suggestions_applied": len(optimization_suggestions),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            if optimization_suggestions:
+                self._apply_optimizations(optimization_suggestions)
+            self._log_reflection(reflection_output)
+            return reflection_output
+        except Exception as e:
+            logger.error(f"Reflection failed: {e}")
+            return {"status": "failure", "error": str(e)}
+
+    def _load_feedback(self) -> List[Dict[str, Any]]:
+        """Loads feedback data from the log file."""
+        feedback_data = []
+        if self.feedback_log_path.exists():
+            with open(self.feedback_log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        feedback_data.append(json.loads(line.strip()))
+                    except json.JSONDecodeError:
+                        logger.warning(f"Skipping malformed JSON line in feedback log: {line.strip()[:100]}...")
+                        continue
+        return feedback_data
+
+    def _apply_optimizations(self, suggestions: List[str]):
+        """Applies optimizations based on suggestions."""
+        for suggestion in suggestions:
+            if "increase_reflection_interval" in suggestion:
+                if 'modules' not in self.config: self.config['modules'] = {}
+                if 'self_reflection' not in self.config['modules']: self.config['modules']['self_reflection'] = {}
+                self.config['modules']['self_reflection']['reflection_interval'] = \
+                    self.config['modules']['self_reflection'].get('reflection_interval', 10) + 5
+                logger.info("Increased reflection interval based on optimization suggestion.")
+
+    def _log_reflection(self, reflection_output: Dict[str, Any]):
+        """Logs the output of a reflection cycle."""
+        with open(self.feedback_log_path, 'a', encoding='utf-8') as f:
+            json.dump(reflection_output, f)
+            f.write('\n')
+        logger.info("Logged reflection output.")
 
 # MemoriaOptimizationEngine
 class MemoriaOptimizationEngine(MemoriaModule):
-  def __init__(self, config: Dict[str, Any]):
-    super().__init__()
-    self.config = config
-    self.optimization_threshold = config.get('modules', {}).get('optimization_engine', {}).get('optimization_threshold', 0.8)
-    logger.info("MemoriaOptimizationEngine initialized.")
+    """A Memoria module for optimizing system parameters based on performance."""
+    def __init__(self, config: Dict[str, Any]):
+        """
+        Initializes the MemoriaOptimizationEngine.
 
-  def initialize(self, config: Dict[str, Any]) -> None:
-    self.config.update(config)
-    logger.info("MemoriaOptimizationEngine initialization complete.")
+        Args:
+            config (Dict[str, Any]): The configuration for the module.
+        """
+        super().__init__()
+        self.config = config
+        self.optimization_threshold = config.get('modules', {}).get('optimization_engine', {}).get('optimization_threshold', 0.8)
+        logger.info("MemoriaOptimizationEngine initialized.")
 
-  def health_check(self) -> bool:
-    return True
+    def initialize(self, config: Dict[str, Any]) -> None:
+        """
+        Initializes the module with the given configuration.
 
-  def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
-    start_time = self._start_op()
-    try:
-      analysis_result = request.get('analysis_result', {})
-      performance_score = analysis_result.get('performance_score', 0.0)
-      if performance_score < self.optimization_threshold:
-        result = self.optimize(analysis_result)
-      else:
-        result = {"status": "skipped", "message": "Performance above threshold."}
-      self._end_op(start_time, success=True)
-      return result
-    except Exception as e:
-      self._end_op(start_time, success=False)
-      raise e
+        Args:
+            config (Dict[str, Any]): The configuration for the module.
+        """
+        self.config.update(config)
+        logger.info("MemoriaOptimizationEngine initialization complete.")
 
-  def optimize(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-      suggestions = analysis_result.get('optimization_suggestions', [])
-      if not suggestions:
-        return {"status": "success", "message": "No optimizations needed."}
+    def health_check(self) -> bool:
+        """
+        Performs a health check on the module.
 
-      for suggestion in suggestions:
-        if "adjust_confidence" in suggestion:
-          if 'modules' not in self.config: self.config['modules'] = {}
-          if 'self_reflection' not in self.config['modules']: self.config['modules']['self_reflection'] = {}
-          self.config['modules']['self_reflection']['confidence_level'] = min(
-            1.0, self.config['modules']['self_reflection'].get('confidence_level', 0.7) + 0.1
-          )
-          logger.info("Adjusted self_reflection confidence based on optimization suggestion.")
+        Returns:
+            bool: True if the module is healthy, False otherwise.
+        """
+        return True
 
-      logger.info(f"Applied {len(suggestions)} optimizations.")
-      return {"status": "success", "optimizations_applied": len(suggestions)}
-    except Exception as e:
-      logger.error(f"Optimization failed: {e}")
-      return {"status": "failure", "error": str(e)}
+    def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Processes a request, triggering optimization if performance is below a threshold.
+
+        Args:
+            request (Dict[str, Any]): The request to process.
+
+        Returns:
+            Dict[str, Any]: The result of the optimization process.
+        """
+        start_time = self._start_op()
+        try:
+            analysis_result = request.get('analysis_result', {})
+            performance_score = analysis_result.get('performance_score', 0.0)
+            if performance_score < self.optimization_threshold:
+                result = self.optimize(analysis_result)
+            else:
+                result = {"status": "skipped", "message": "Performance above threshold."}
+            self._end_op(start_time, success=True)
+            return result
+        except Exception as e:
+            self._end_op(start_time, success=False)
+            raise e
+
+    def optimize(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Performs optimization based on analysis results.
+
+        Args:
+            analysis_result (Dict[str, Any]): The analysis result to base
+                optimization on.
+
+        Returns:
+            Dict[str, Any]: The output of the optimization.
+        """
+        try:
+            suggestions = analysis_result.get('optimization_suggestions', [])
+            if not suggestions:
+                return {"status": "success", "message": "No optimizations needed."}
+
+            for suggestion in suggestions:
+                if "adjust_confidence" in suggestion:
+                    if 'modules' not in self.config: self.config['modules'] = {}
+                    if 'self_reflection' not in self.config['modules']: self.config['modules']['self_reflection'] = {}
+                    self.config['modules']['self_reflection']['confidence_level'] = min(
+                        1.0, self.config['modules']['self_reflection'].get('confidence_level', 0.7) + 0.1
+                    )
+                    logger.info("Adjusted self_reflection confidence based on optimization suggestion.")
+
+            logger.info(f"Applied {len(suggestions)} optimizations.")
+            return {"status": "success", "optimizations_applied": len(suggestions)}
+        except Exception as e:
+            logger.error(f"Optimization failed: {e}")
+            return {"status": "failure", "error": str(e)}
 
 # MemoriaAnalysisInterface
 class MemoriaAnalysisInterface(MemoriaModule):
-  def __init__(self, config: Dict[str, Any]):
-    super().__init__()
-    self.config = config
-    self.client = None
-    self.api_enabled = config.get('modules', {}).get('analysis_interface', {}).get('enabled', False)
-    if OpenAI and self.api_enabled: # OpenAI imported at top, checked within optional dependencies
-      try:
-        self.client = OpenAI(api_key="mock-api-key")
-        logger.info("MemoriaAnalysisInterface OpenAI client initialized.")
-      except Exception as e:
-        logger.error(f"Failed to initialize MemoriaAnalysisInterface OpenAI client: {e}")
-    logger.info("MemoriaAnalysisInterface initialized.")
+    """A Memoria module for interfacing with an external analysis API (e.g., OpenAI)."""
+    def __init__(self, config: Dict[str, Any]):
+        """
+        Initializes the MemoriaAnalysisInterface.
 
-  def initialize(self, config: Dict[str, Any]) -> None:
-    self.config.update(config)
-    self.api_enabled = config.get('modules', {}).get('analysis_interface', {}).get('enabled', False)
-    if OpenAI and self.api_enabled and not self.client:
-      try:
-        self.client = OpenAI(api_key="mock-api-key")
-        logger.info("MemoriaAnalysisInterface OpenAI client re-initialized upon configuration update.")
-      except Exception as e:
-        logger.error(f"Failed to re-initialize MemoriaAnalysisInterface OpenAI client: {e}")
-    elif not self.api_enabled and self.client:
-      self.client = None
-    logger.info("MemoriaAnalysisInterface initialization complete.")
+        Args:
+            config (Dict[str, Any]): The configuration for the module.
+        """
+        super().__init__()
+        self.config = config
+        self.client = None
+        self.api_enabled = config.get('modules', {}).get('analysis_interface', {}).get('enabled', False)
+        if OpenAI and self.api_enabled:
+            try:
+                self.client = OpenAI(api_key="mock-api-key")
+                logger.info("MemoriaAnalysisInterface OpenAI client initialized.")
+            except Exception as e:
+                logger.error(f"Failed to initialize MemoriaAnalysisInterface OpenAI client: {e}")
+        logger.info("MemoriaAnalysisInterface initialized.")
 
-  def health_check(self) -> bool:
-    return self.client is not None or not self.api_enabled
+    def initialize(self, config: Dict[str, Any]) -> None:
+        """
+        Initializes the module with the given configuration.
 
-  def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
-    start_time = self._start_op()
-    try:
-      if not self.api_enabled or not self.client:
-        result = {"status": "skipped", "message": "OpenAI API not enabled or client not initialized."}
-      else:
-        code_snippet = request.get('code_snippet', '')
-        performance_metrics = request.get('performance_metrics', {})
-        prompt = (f"Analyze the following Python code and system performance metrics...")
+        Args:
+            config (Dict[str, Any]): The configuration for the module.
+        """
+        self.config.update(config)
+        self.api_enabled = config.get('modules', {}).get('analysis_interface', {}).get('enabled', False)
+        if OpenAI and self.api_enabled and not self.client:
+            try:
+                self.client = OpenAI(api_key="mock-api-key")
+                logger.info("MemoriaAnalysisInterface OpenAI client re-initialized upon configuration update.")
+            except Exception as e:
+                logger.error(f"Failed to re-initialize MemoriaAnalysisInterface OpenAI client: {e}")
+        elif not self.api_enabled and self.client:
+            self.client = None
+        logger.info("MemoriaAnalysisInterface initialization complete.")
 
-        response = {
-          "performance_score": 0.85,
-          "optimization_suggestions": ["Reduce nested loops", "Add type hints for clarity"]
-        }
-        logger.info(f"MemoriaAnalysisInterface OpenAI analysis completed: Score {response['performance_score']}")
-        result = {"status": "success", "analysis_result": response}
-      self._end_op(start_time, success=result['status'] == 'success')
-      return result
-    except Exception as e:
-      self._end_op(start_time, success=False)
-      raise e
+    def health_check(self) -> bool:
+        """
+        Performs a health check on the module.
+
+        Returns:
+            bool: True if the module is healthy, False otherwise.
+        """
+        return self.client is not None or not self.api_enabled
+
+    def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Processes a request by sending it to the external analysis API.
+
+        Args:
+            request (Dict[str, Any]): The request to process.
+
+        Returns:
+            Dict[str, Any]: The result from the analysis API.
+        """
+        start_time = self._start_op()
+        try:
+            if not self.api_enabled or not self.client:
+                result = {"status": "skipped", "message": "OpenAI API not enabled or client not initialized."}
+            else:
+                code_snippet = request.get('code_snippet', '')
+                performance_metrics = request.get('performance_metrics', {})
+                prompt = (f"Analyze the following Python code and system performance metrics...")
+
+                response = {
+                    "performance_score": 0.85,
+                    "optimization_suggestions": ["Reduce nested loops", "Add type hints for clarity"]
+                }
+                logger.info(f"MemoriaAnalysisInterface OpenAI analysis completed: Score {response['performance_score']}")
+                result = {"status": "success", "analysis_result": response}
+            self._end_op(start_time, success=result['status'] == 'success')
+            return result
+        except Exception as e:
+            self._end_op(start_time, success=False)
+            raise e
 
 # MemoriaCore - This class needs to be aware of other Memoria classes
 # These are now defined earlier in this same file.
 class MemoriaCore(MemoriaModule):
-  def __init__(self, config_path: str = 'ecosystem/memoria/config/memoria_config.json'):
-    super().__init__()
-    self.config_path = Path(config_path)
-    self.config = {}
-    self.modules: Dict[str, MemoriaModule] = {}
-    self.load_config()
-    logger.info("MemoriaCore initialized.")
+    """The core of the Memoria ecosystem, managing all other Memoria modules."""
+    def __init__(self, config_path: str = 'ecosystem/memoria/config/memoria_config.json'):
+        """
+        Initializes the MemoriaCore.
 
-  def load_config(self):
-    if not self.config_path.exists():
-      self._create_default_config()
-    with open(self.config_path, 'r', encoding='utf-8') as f:
-      self.config = json.load(f)
-    logger.info("MemoriaCore configuration loaded.")
+        Args:
+            config_path (str, optional): The path to the Memoria configuration file.
+                Defaults to 'ecosystem/memoria/config/memoria_config.json'.
+        """
+        super().__init__()
+        self.config_path = Path(config_path)
+        self.config = {}
+        self.modules: Dict[str, MemoriaModule] = {}
+        self.load_config()
+        logger.info("MemoriaCore initialized.")
 
-  def _create_default_config(self):
-    default_config = {
-      "modules": {
-        "self_reflection": {"enabled": True, "reflection_interval": 10},
-        "optimization_engine": {"enabled": True, "optimization_threshold": 0.8},
-        "analysis_interface": {"enabled": True, "api_provider": "openai"}
-      },
-      "system_parameters": {
-        "log_level": "INFO",
-        "max_retries": 3,
-        "analysis_timeout": 30.0
-      }
-    }
-    self.config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(self.config_path, 'w', encoding='utf-8') as f:
-      json.dump(default_config, f, indent=2)
-    logger.info(f"Created default memoria_config.json at {self.config_path}")
+    def load_config(self):
+        """Loads the Memoria configuration from disk."""
+        if not self.config_path.exists():
+            self._create_default_config()
+        with open(self.config_path, 'r', encoding='utf-8') as f:
+            self.config = json.load(f)
+        logger.info("MemoriaCore configuration loaded.")
 
-  def save_config(self):
-    with open(self.config_path, 'w', encoding='utf-8') as f:
-      json.dump(self.config, f, indent=2)
-    logger.info("MemoriaCore configuration saved.")
+    def _create_default_config(self):
+        """Creates a default Memoria configuration file."""
+        default_config = {
+            "modules": {
+                "self_reflection": {"enabled": True, "reflection_interval": 10},
+                "optimization_engine": {"enabled": True, "optimization_threshold": 0.8},
+                "analysis_interface": {"enabled": True, "api_provider": "openai"}
+            },
+            "system_parameters": {
+                "log_level": "INFO",
+                "max_retries": 3,
+                "analysis_timeout": 30.0
+            }
+        }
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.config_path, 'w', encoding='utf-8') as f:
+            json.dump(default_config, f, indent=2)
+        logger.info(f"Created default memoria_config.json at {self.config_path}")
 
-  def initialize(self, config: Dict[str, Any]) -> None:
-    self.config.update(config)
-    self.save_config()
-    for module_name, module_config in self.config.get('modules', {}).items():
-      if module_config.get('enabled', False):
-        logger.info(f"Initializing module: {module_name}")
-        # These now refer to the classes defined earlier in this same file.
-        if module_name == "self_reflection":
-          self.modules[module_name] = MemoriaSelfReflection(self.config)
-        elif module_name == "optimization_engine":
-          self.modules[module_name] = MemoriaOptimizationEngine(self.config)
-        elif module_name == "analysis_interface":
-          self.modules[module_name] = MemoriaAnalysisInterface(self.config)
-        
-        if hasattr(self.modules[module_name], 'initialize') and callable(self.modules[module_name].initialize):
-            self.modules[module_name].initialize(module_config)
-    logger.info("MemoriaCore initialization complete.")
+    def save_config(self):
+        """Saves the current Memoria configuration to disk."""
+        with open(self.config_path, 'w', encoding='utf-8') as f:
+            json.dump(self.config, f, indent=2)
+        logger.info("MemoriaCore configuration saved.")
 
-  def register_module(self, name: str, module: MemoriaModule):
-    self.modules[name] = module
-    logger.info(f"Registered module: {name}")
+    def initialize(self, config: Dict[str, Any]) -> None:
+        """
+        Initializes the MemoriaCore and its sub-modules.
 
-  def health_check(self) -> bool:
-    return all(module.health_check() for module in self.modules.values())
+        Args:
+            config (Dict[str, Any]): The configuration for the module.
+        """
+        self.config.update(config)
+        self.save_config()
+        for module_name, module_config in self.config.get('modules', {}).items():
+            if module_config.get('enabled', False):
+                logger.info(f"Initializing module: {module_name}")
+                if module_name == "self_reflection":
+                    self.modules[module_name] = MemoriaSelfReflection(self.config)
+                elif module_name == "optimization_engine":
+                    self.modules[module_name] = MemoriaOptimizationEngine(self.config)
+                elif module_name == "analysis_interface":
+                    self.modules[module_name] = MemoriaAnalysisInterface(self.config)
 
-  def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-    start_time = self._start_op()
-    result = {"status": "success", "data": {}}
-    success = True
-    for name, module in self.modules.items():
-      op_start_time = module._start_op()
-      try:
-        if hasattr(module, 'process') and callable(module.process):
-          module_result = module.process(request)
-          result["data"][name] = module_result
-          module._end_op(op_start_time, success=True)
-        else:
-            logger.warning(f"Module {name} does not have a 'process' method.")
-            result["data"][name] = {"error": "No process method"}
-            module._end_op(op_start_time, success=False)
-      except Exception as e:
-        logger.error(f"Module {name} failed during processing: {e}")
-        result["status"] = "partial_failure"
-        result["data"][name] = {"error": str(e)}
-        success = False
-        module._end_op(op_start_time, success=False)
-    self._end_op(start_time, success=success)
-    return result
+                if hasattr(self.modules[module_name], 'initialize') and callable(self.modules[module_name].initialize):
+                    self.modules[module_name].initialize(module_config)
+        logger.info("MemoriaCore initialization complete.")
+
+    def register_module(self, name: str, module: MemoriaModule):
+        """
+        Registers a new Memoria module with the core.
+
+        Args:
+            name (str): The name of the module.
+            module (MemoriaModule): The module instance to register.
+        """
+        self.modules[name] = module
+        logger.info(f"Registered module: {name}")
+
+    def health_check(self) -> bool:
+        """
+        Performs a health check on the MemoriaCore and all its sub-modules.
+
+        Returns:
+            bool: True if all modules are healthy, False otherwise.
+        """
+        return all(module.health_check() for module in self.modules.values())
+
+    def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Processes a request by passing it through all registered Memoria modules.
+
+        Args:
+            request (Dict[str, Any]): The request to process.
+
+        Returns:
+            Dict[str, Any]: The aggregated results from all modules.
+        """
+        start_time = self._start_op()
+        result = {"status": "success", "data": {}}
+        success = True
+        for name, module in self.modules.items():
+            op_start_time = module._start_op()
+            try:
+                if hasattr(module, 'process') and callable(module.process):
+                    module_result = module.process(request)
+                    result["data"][name] = module_result
+                    module._end_op(op_start_time, success=True)
+                else:
+                    logger.warning(f"Module {name} does not have a 'process' method.")
+                    result["data"][name] = {"error": "No process method"}
+                    module._end_op(op_start_time, success=False)
+            except Exception as e:
+                logger.error(f"Module {name} failed during processing: {e}")
+                result["status"] = "partial_failure"
+                result["data"][name] = {"error": str(e)}
+                success = False
+                module._end_op(op_start_time, success=False)
+        self._end_op(start_time, success=success)
+        return result
 
 # <--- END OF MEMORIA ECOSYSTEM CLASS DEFINITIONS --->
 
@@ -593,12 +787,26 @@ class MemoriaCore(MemoriaModule):
 class SystemDiagnostics:
   """Handles verification and testing of system components and file creation."""
   def __init__(self, bootstrapper: 'IntellisenseBootstrapper'):
+    """
+    Initializes the SystemDiagnostics component.
+
+    Args:
+        bootstrapper (IntellisenseBootstrapper): An instance of the bootstrapper.
+    """
     self.bootstrapper = bootstrapper
     self.diagnostic_log_path = Path("diagnostics.log")
     logger.info("SystemDiagnostics initialized.")
 
   def verify_file_creation(self, file_path: Path) -> bool:
-    """Verify if a file exists and is syntactically valid."""
+    """
+    Verifies if a file exists and is syntactically valid.
+
+    Args:
+        file_path (Path): The path to the file to verify.
+
+    Returns:
+        bool: True if the file is valid, False otherwise.
+    """
     if not file_path.exists():
       logger.error(f"File {file_path} does not exist.")
       return False
@@ -624,14 +832,18 @@ class SystemDiagnostics:
     return True
 
   def verify_module_import(self, module_path: Path, module_name: str) -> bool:
-    """Verify if a module can be imported.
-       For modules in 'ecosystem', requires 'ecosystem' to be in sys.path or loaded.
-       This is used for external files.
+    """
+    Verifies if a module can be imported from a given path.
+
+    Args:
+        module_path (Path): The path to the Python module file.
+        module_name (str): The name to import the module as.
+
+    Returns:
+        bool: True if the module can be imported, False otherwise.
     """
     try:
-      # Temporarily add the parent directory of 'ecosystem' (which is the root) to sys.path
-      # to allow absolute imports like 'ecosystem.memoria.memoria_core'
-      project_root = module_path.parents[2] # Assumes structure like <project_root>/ecosystem/memoria/file.py
+      project_root = module_path.parents[2]
       original_sys_path = sys.path[:]
       if str(project_root) not in sys.path:
           sys.path.insert(0, str(project_root))
@@ -649,12 +861,21 @@ class SystemDiagnostics:
       logger.error(f"Failed to import module {module_name} from {module_path}: {e}")
       return False
     finally:
-        # Restore original sys.path
         sys.path = original_sys_path
 
 
   def run_diagnostics(self, files_to_verify: List[Path], modules_to_verify: List[Tuple[Path, str]]) -> Dict[str, bool]:
-    """Run diagnostics on files and modules."""
+    """
+    Runs diagnostics on a list of files and modules.
+
+    Args:
+        files_to_verify (List[Path]): A list of file paths to verify.
+        modules_to_verify (List[Tuple[Path, str]]): A list of tuples, where each
+            tuple contains the path to a module and its import name.
+
+    Returns:
+        Dict[str, bool]: A dictionary of diagnostic results.
+    """
     results = {}
     for file_path in files_to_verify:
       results[str(file_path)] = self.verify_file_creation(file_path)
@@ -1040,6 +1261,13 @@ class MemoriaAnalysisInterface(MemoriaModule):
 class IntellisenseBootstrapper:
   """Manages configuration and initialization of IntellisenseSystem and Memoria ecosystem."""
   def __init__(self, config_path: str = 'intellisense_config.json'):
+    """
+    Initializes the IntellisenseBootstrapper.
+
+    Args:
+        config_path (str, optional): The path to the main configuration file.
+            Defaults to 'intellisense_config.json'.
+    """
     self.config_path = Path(config_path)
     self.config = {}
     self.embedding_dimension = 384
@@ -1051,6 +1279,7 @@ class IntellisenseBootstrapper:
     self.verify_memoria_ecosystem() # Verifies the externally created files
 
   def load_config(self):
+    """Loads the main configuration file, creating a default if it doesn't exist."""
     if not self.config_path.exists():
       self._create_default_config()
     with open(self.config_path, 'r', encoding='utf-8') as f:
@@ -1069,6 +1298,7 @@ class IntellisenseBootstrapper:
         logger.warning(f"Error determining embedding dimension from provider: {e}. Using configured or default.")
 
   def _create_default_config(self):
+    """Creates a default configuration file."""
     default_config = {
       "core_directives": [
         {"name": "code_quality", "weight": 15},
@@ -1172,20 +1402,19 @@ class IntellisenseBootstrapper:
     logger.info(f"Created default intellisense_config.json at {self.config_path}")
 
   def save_config(self):
+    """Saves the current configuration to disk."""
     with open(self.config_path, 'w', encoding='utf-8') as f:
       json.dump(self.config, f, indent=2)
     logger.info("Configuration saved.")
 
   def initialize_memoria_ecosystem(self):
-    """Initialize the Memoria ecosystem and generate files if missing."""
+    """Initializes the Memoria ecosystem by generating its files if they are missing or outdated."""
     if not self.config.get('memoria_ecosystem', {}).get('enabled', False):
       logger.info("Memoria ecosystem disabled in config.")
       return
 
     self.memoria_ecosystem_path.mkdir(parents=True, exist_ok=True)
 
-    # Define content using the constants (defined at the top of the file)
-    # These strings still contain relative imports as they will be written to distinct files.
     memoria_files = {
       self.memoria_ecosystem_path / '__init__.py': """
 from .memoria_core import MemoriaCore
@@ -1194,7 +1423,6 @@ from .self_reflection import MemoriaSelfReflection
 from .optimization_engine import MemoriaOptimizationEngine
 from .analysis_interface import MemoriaAnalysisInterface
 """,
-      # Use the content constants, which are mirrors of the class definitions above
       self.memoria_ecosystem_path / 'memoria_module.py': MEMORIA_MODULE_BASE_CONTENT,
       self.memoria_ecosystem_path / 'memoria_core.py': MEMORIA_CORE_CONTENT,
       self.memoria_ecosystem_path / 'self_reflection.py': SELF_REFLECTION_CONTENT,
@@ -1215,8 +1443,6 @@ from .analysis_interface import MemoriaAnalysisInterface
     }
 
     for file_path, content in memoria_files.items():
-      # Only write if file doesn't exist or content has changed (simple byte comparison)
-      # This heuristic allows manual edits to persist unless class definitions here change.
       current_content_bytes = None
       if file_path.exists():
           with open(file_path, 'rb') as f:
@@ -1234,7 +1460,7 @@ from .analysis_interface import MemoriaAnalysisInterface
 
 
   def verify_memoria_ecosystem(self):
-    """Verify the creation and integrity of Memoria ecosystem files."""
+    """Verifies the creation and integrity of the Memoria ecosystem files."""
     if not self.config.get('memoria_ecosystem', {}).get('enabled', False):
       logger.info("Memoria ecosystem disabled, skipping verification.")
       return
@@ -1259,8 +1485,8 @@ from .analysis_interface import MemoriaAnalysisInterface
     results = self.diagnostics.run_diagnostics(files_to_verify, modules_to_verify)
     if not all(results.values()):
       logger.error("Memoria ecosystem verification failed. Attempting regeneration.")
-      self.initialize_memoria_ecosystem() # Try recreating missing files/folders
-      results = self.diagnostics.run_diagnostics(files_to_verify, modules_to_verify) # Re-verify
+      self.initialize_memoria_ecosystem()
+      results = self.diagnostics.run_diagnostics(files_to_verify, modules_to_verify)
       if not all(results.values()):
         logger.critical("Failed to verify Memoria ecosystem after regeneration. Some Memoria functionality may be impaired.")
       else:
@@ -1270,8 +1496,20 @@ from .analysis_interface import MemoriaAnalysisInterface
 
 
 class CodebaseHealthModeler:
-  """Models codebase health using mathematical manifolds with advanced analysis."""
+  """
+    Models codebase health using mathematical manifolds with advanced analysis.
+
+    This class provides methods to load, verify, and apply mathematical
+    projections to model various aspects of codebase health, such as stability
+    and test coverage.
+    """
   def __init__(self, bootstrapper: 'IntellisenseBootstrapper'):
+    """
+    Initializes the CodebaseHealthModeler.
+
+    Args:
+        bootstrapper (IntellisenseBootstrapper): An instance of the bootstrapper.
+    """
     self.bootstrapper = bootstrapper
     self.registry_path = Path("codebase_health_registry.json")
     self.projections: Dict[str, Dict[str, Any]] = {}
@@ -1287,16 +1525,24 @@ class CodebaseHealthModeler:
     logger.info("CodebaseHealthModeler initialized.")
 
   def _start_op(self):
+    """Marks the start of an operation for metric tracking."""
     self._invocations += 1
     return time.perf_counter()
 
   def _end_op(self, start_time: float, success: bool = True):
+    """Marks the end of an operation for metric tracking."""
     latency = time.perf_counter() - start_time
     self._total_latency += latency
     if success:
       self._successful_invocations += 1
 
   def get_operational_metrics(self) -> Dict[str, Any]:
+    """
+    Gets the operational metrics for the module.
+
+    Returns:
+        Dict[str, Any]: A dictionary of operational metrics.
+    """
     success_rate = (self._successful_invocations / self._invocations) if self._invocations > 0 else 0.0
     avg_latency_ms = (self._total_latency / self._invocations * 1000) if self._invocations > 0 else 0.0
     return {
@@ -1308,6 +1554,7 @@ class CodebaseHealthModeler:
     }
 
   def load_registry(self):
+    """Loads the projection registry from disk, creating a default if it doesn't exist."""
     op_start_time = self._start_op()
     try:
       if not self.registry_path.exists():
@@ -1319,10 +1566,11 @@ class CodebaseHealthModeler:
     except Exception as e:
       logger.error(f"[CodebaseHealthModeler] Error loading registry: {e}")
       self._end_op(op_start_time, success=False)
-      raise # Re-raise to propagate error for health checks.
+      raise
 
 
   def _create_default_registry(self):
+    """Creates a default projection registry file."""
     op_start_time = self._start_op()
     try:
       default_data = {
@@ -1350,23 +1598,35 @@ class CodebaseHealthModeler:
     except Exception as e:
       logger.error(f"Error creating default registry: {e}")
       self._end_op(op_start_time, success=False)
-      raise # Re-raise to propagate error for health checks.
+      raise
 
 
   def _get_param(self, name: str, default: float) -> float:
+    """Gets a parameter value from the configuration."""
     return self.bootstrapper.config.get('parameters', {}).get(name, {}).get('value', default)
 
   def _stability_projection_v1(self, complexity: float, risk: float) -> float:
+    """A projection function for code stability."""
     if np is None: raise ImportError("NumPy required.")
     stability = self._get_param('stability_factor', 1.0)
     return float(complexity * np.exp(-risk / stability))
 
   def _coverage_projection_v1(self, coverage: float, lines: float) -> float:
+    """A projection function for test coverage."""
     if np is None: raise ImportError("NumPy required.")
     target = self._get_param('coverage_target', 0.85)
     return float(-np.log(max(0.01, target - coverage)) * lines)
 
   def get_projection(self, name: str) -> Optional[Dict[str, Any]]:
+    """
+    Gets the metadata for a named projection.
+
+    Args:
+        name (str): The name of the projection.
+
+    Returns:
+        Optional[Dict[str, Any]]: The projection metadata, or None if not found.
+    """
     op_start_time = self._start_op()
     proj = self.projections.get(name)
     if proj and proj.get('status') == 'active':
@@ -1377,6 +1637,15 @@ class CodebaseHealthModeler:
     return None
 
   def get_projection_function(self, proj_name: str) -> Optional[Callable]:
+    """
+    Gets the callable function for a named projection.
+
+    Args:
+        proj_name (str): The name of the projection.
+
+    Returns:
+        Optional[Callable]: The projection function, or None if not found.
+    """
     projection_info = self.get_projection(proj_name)
     if projection_info:
       func_name = projection_info.get("equation_name")
@@ -1385,6 +1654,7 @@ class CodebaseHealthModeler:
     return None
 
   def _curvature_analysis(self, func: Callable, u_grid: np.ndarray, r_grid: np.ndarray) -> Tuple[float, float]:
+    """Performs curvature analysis on a projection function."""
     if np is None: return 0.0, 0.0
     try:
       Z = np.array([[func(u, r) for u in u_grid[0,:]] for r in r_grid[:,0]])
@@ -1396,8 +1666,8 @@ class CodebaseHealthModeler:
       d2Z_du2 = np.gradient(dZ_du, axis=1)
       d2Z_dr2 = np.gradient(dZ_dr, axis=0)
       d2Z_dudr = np.gradient(dZ_du, axis=0)
-      E = 1 + dZ_du**2; F = dZ_du * dZ_dr; G = 1 + dZ_dr**2 # First Fundamental Form coefficients
-      norm_factor = np.sqrt(1 + dZ_du**2 + dZ_dr**2); denominator_second_form = norm_factor + 1e-9 # Prevent div by zero
+      E = 1 + dZ_du**2; F = dZ_du * dZ_dr; G = 1 + dZ_dr**2
+      norm_factor = np.sqrt(1 + dZ_du**2 + dZ_dr**2); denominator_second_form = norm_factor + 1e-9
       L = d2Z_du2 / denominator_second_form; M = d2Z_dudr / denominator_second_form; N = d2Z_dr2 / denominator_second_form
       det_first_form = E * G - F * F; valid_indices = det_first_form > 1e-12
       k_values = np.zeros_like(det_first_form); h_values = np.zeros_like(det_first_form)
@@ -1411,6 +1681,7 @@ class CodebaseHealthModeler:
     except Exception as e: logger.debug(f"Curvature analysis failed: {e}. Returning 0.0, 0.0."); return 0.0, 0.0
 
   def _wavelet_analysis(self, func: Callable, u_sample: np.ndarray) -> Optional[float]:
+    """Performs wavelet analysis on a projection function."""
     if pywt is None or np is None: return None
     try:
       r_fixed_value = np.mean(u_sample)
@@ -1428,6 +1699,17 @@ class CodebaseHealthModeler:
     except Exception as e: logger.debug(f"Wavelet analysis failed: {e}. Returning None."); return None
 
   def verify_projection(self, proj_name: str, u_range: Tuple[float, float], r_range: Tuple[float, float]) -> bool:
+    """
+    Verifies a projection by analyzing its mathematical properties.
+
+    Args:
+        proj_name (str): The name of the projection to verify.
+        u_range (Tuple[float, float]): The range of the first input variable.
+        r_range (Tuple[float, float]): The range of the second input variable.
+
+    Returns:
+        bool: True if the projection is verified, False otherwise.
+    """
     op_start_time = self._start_op()
     proj_func = self.get_projection_function(proj_name)
     if proj_func is None or np is None:
@@ -1452,11 +1734,28 @@ class CodebaseHealthModeler:
       logger.error(f"Error during verification for '{proj_name}': {e}"); self._end_op(op_start_time, success=False); return False
 
   def health_check(self) -> bool:
+    """
+    Performs a health check on the module.
+
+    Returns:
+        bool: True if the module is healthy, False otherwise.
+    """
     return self.registry_path.exists()
 
 class DeveloperPersonaEngine:
-  """Shapes AI suggestions to match developer archetypes based on context and urgency."""
+  """
+    Shapes AI suggestions to match developer archetypes based on context and urgency.
+
+    This engine dynamically adjusts the tone and confidence of its responses to
+    better suit the perceived needs of the developer.
+    """
   def __init__(self, bootstrapper: 'IntellisenseBootstrapper'):
+    """
+    Initializes the DeveloperPersonaEngine.
+
+    Args:
+        bootstrapper (IntellisenseBootstrapper): An instance of the bootstrapper.
+    """
     self.bootstrapper = bootstrapper
     self.persona_traits = self.bootstrapper.config['developer_persona']
     self._invocations = 0
@@ -1465,12 +1764,21 @@ class DeveloperPersonaEngine:
     self.state_history = []
     logger.info("DeveloperPersonaEngine initialized.")
 
-  def _start_op(self): self._invocations += 1; return time.perf_counter()
+  def _start_op(self):
+    """Marks the start of an operation for metric tracking."""
+    self._invocations += 1; return time.perf_counter()
   def _end_op(self, start_time: float, success: bool = True):
+    """Marks the end of an operation for metric tracking."""
     latency = time.perf_counter() - start_time; self._total_latency += latency
     if success: self._successful_invocations += 1
 
   def get_operational_metrics(self) -> Dict[str, Any]:
+    """
+    Gets the operational metrics for the module.
+
+    Returns:
+        Dict[str, Any]: A dictionary of operational metrics.
+    """
     success_rate = (self._successful_invocations / self._invocations) if self._invocations > 0 else 0.0
     avg_latency_ms = (self._total_latency / self._invocations * 1000) if self._invocations > 0 else 0.0
     return {
@@ -1479,6 +1787,14 @@ class DeveloperPersonaEngine:
     }
 
   def update_persona(self, context: Dict[str, Any], urgency: float, reward: float):
+    """
+    Updates the developer persona based on the current context, urgency, and feedback.
+
+    Args:
+        context (Dict[str, Any]): The context of the interaction.
+        urgency (float): The calculated urgency level.
+        reward (float): The feedback reward from the previous turn.
+    """
     op_start_time = self._start_op(); success = False
     try:
       effective_urgency = urgency if urgency is not None else self.persona_traits.get('urgency_level', 0.5)
@@ -1495,6 +1811,16 @@ class DeveloperPersonaEngine:
       self._end_op(op_start_time, success)
 
   def shape_response(self, base_response: str, urgency: float) -> str:
+    """
+    Shapes a base response according to the current developer persona.
+
+    Args:
+        base_response (str): The base response to shape.
+        urgency (float): The current urgency level.
+
+    Returns:
+        str: The shaped response.
+    """
     op_start_time = self._start_op(); success = False
     try:
       confidence = self.persona_traits.get('confidence_level', 0.7)
@@ -1507,11 +1833,29 @@ class DeveloperPersonaEngine:
     finally:
       self._end_op(op_start_time, success)
 
-  def health_check(self) -> bool: return bool(self.persona_traits)
+  def health_check(self) -> bool:
+    """
+    Performs a health check on the module.
+
+    Returns:
+        bool: True if the module is healthy, False otherwise.
+    """
+    return bool(self.persona_traits)
 
 class DiagnosticUrgencySystem:
-  """Quantifies focus and urgency based on contextual momentum and code metrics."""
+  """
+    Quantifies focus and urgency based on contextual momentum and code metrics.
+
+    This system analyzes user input and code metrics to determine the urgency
+    of a situation, which can then be used to guide the AI's response.
+    """
   def __init__(self, bootstrapper: 'IntellisenseBootstrapper'):
+    """
+    Initializes the DiagnosticUrgencySystem.
+
+    Args:
+        bootstrapper (IntellisenseBootstrapper): An instance of the bootstrapper.
+    """
     self.bootstrapper = bootstrapper
     self.diagnostic_keywords = self.bootstrapper.config['diagnostic_keywords']
     self.urgency_level = self.bootstrapper.config['developer_persona']['urgency_level']
@@ -1520,12 +1864,21 @@ class DiagnosticUrgencySystem:
     self._total_latency = 0.0
     logger.info("DiagnosticUrgencySystem initialized.")
 
-  def _start_op(self): self._invocations += 1; return time.perf_counter()
+  def _start_op(self):
+    """Marks the start of an operation for metric tracking."""
+    self._invocations += 1; return time.perf_counter()
   def _end_op(self, start_time: float, success: bool = True):
+    """Marks the end of an operation for metric tracking."""
     latency = time.perf_counter() - start_time; self._total_latency += latency
     if success: self._successful_invocations += 1
 
   def get_operational_metrics(self) -> Dict[str, Any]:
+    """
+    Gets the operational metrics for the module.
+
+    Returns:
+        Dict[str, Any]: A dictionary of operational metrics.
+    """
     success_rate = (self._successful_invocations / self._invocations) if self._invocations > 0 else 0.0
     avg_latency_ms = (self._total_latency / self._invocations * 1000) if self._invocations > 0 else 0.0
     return {
@@ -1534,6 +1887,16 @@ class DiagnosticUrgencySystem:
     }
 
   def analyze_context(self, user_input: str, code_metrics: Dict[str, Any]) -> float:
+    """
+    Analyzes the user input and code metrics to determine a context score.
+
+    Args:
+        user_input (str): The user's input text.
+        code_metrics (Dict[str, Any]): A dictionary of code metrics.
+
+    Returns:
+        float: The calculated context score.
+    """
     op_start_time = self._start_op(); success = False
     try:
       input_lower = user_input.lower()
@@ -1551,6 +1914,13 @@ class DiagnosticUrgencySystem:
       self._end_op(op_start_time, success)
 
   def update_urgency(self, context_score: float, momentum: float):
+    """
+    Updates the urgency level based on the context score and momentum.
+
+    Args:
+        context_score (float): The context score from the analysis.
+        momentum (float): The momentum of the codebase health.
+    """
     op_start_time = self._start_op(); success = False
     try:
       urgency_delta = 0.05 if momentum > 0 else (-0.05 if momentum < 0 else 0.0)
@@ -1562,19 +1932,40 @@ class DiagnosticUrgencySystem:
     finally:
       self._end_op(op_start_time, success)
 
-  def get_urgency_level(self) -> float: return self.urgency_level
+  def get_urgency_level(self) -> float:
+    """
+    Gets the current urgency level.
 
-  def health_check(self) -> bool: return bool(self.diagnostic_keywords)
+    Returns:
+        float: The current urgency level.
+    """
+    return self.urgency_level
+
+  def health_check(self) -> bool:
+    """
+    Performs a health check on the module.
+
+    Returns:
+        bool: True if the module is healthy, False otherwise.
+    """
+    return bool(self.diagnostic_keywords)
 
 class ModuleStateTracker:
   """Manages persistent snapshots of module operational states."""
   def __init__(self, db_path: Path):
+    """
+    Initializes the ModuleStateTracker.
+
+    Args:
+        db_path (Path): The path to the SQLite database file.
+    """
     self.db_path = db_path
     self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
     self._create_table()
     logger.info(f"ModuleStateTracker initialized for DB: {db_path}")
 
   def _create_table(self):
+    """Creates the database table for module snapshots if it doesn't exist."""
     with self.conn:
       self.conn.execute("""
         CREATE TABLE IF NOT EXISTS module_snapshots (
@@ -1596,7 +1987,12 @@ class ModuleStateTracker:
     logger.info("Module snapshots DB Table created/verified.")
 
   def record_snapshot(self, snapshot_data: Dict[str, Any]):
-    """Records a single snapshot of a module's state and operational metrics."""
+    """
+    Records a single snapshot of a module's state and operational metrics.
+
+    Args:
+        snapshot_data (Dict[str, Any]): A dictionary of snapshot data.
+    """
     timestamp = datetime.now(timezone.utc).isoformat()
     module_name = snapshot_data.get('module_name')
     if not module_name:
@@ -1623,7 +2019,18 @@ class ModuleStateTracker:
   def retrieve_latest_snapshots(self, criteria: Optional[Dict[str, Any]] = None, limit: int = 10) -> List[Dict[str, Any]]:
     """
     Retrieves the latest snapshots based on criteria.
-    If no criteria, retrieves the single latest snapshot for each module.
+
+    If no criteria are provided, it retrieves the single latest snapshot for
+    each module.
+
+    Args:
+        criteria (Optional[Dict[str, Any]], optional): A dictionary of
+            criteria to filter snapshots by. Defaults to None.
+        limit (int, optional): The maximum number of snapshots to return.
+            Defaults to 10.
+
+    Returns:
+        List[Dict[str, Any]]: A list of snapshot dictionaries.
     """
     query = """
       SELECT T1.*
@@ -1638,7 +2045,6 @@ class ModuleStateTracker:
     params: List[Any] = []
 
     if criteria:
-      # Build dynamic WHERE clause for filtering
       where_clauses = []
       if 'module_name' in criteria:
         where_clauses.append("T1.module_name = ?")
@@ -1666,11 +2072,10 @@ class ModuleStateTracker:
         column_names = [description[0] for description in cursor.description]
         for row in cursor.fetchall():
           row_dict = dict(zip(column_names, row))
-          # Deserialize JSON fields
-          if row_dict['config_snapshot_json']: # type: ignore
-            row_dict['config_snapshot'] = json.loads(row_dict['config_snapshot_json']) # type: ignore
-          if row_dict['performance_metrics_json']: # type: ignore
-            row_dict['performance_metrics'] = json.loads(row_dict['performance_metrics_json']) # type: ignore
+          if row_dict['config_snapshot_json']:
+            row_dict['config_snapshot'] = json.loads(row_dict['config_snapshot_json'])
+          if row_dict['performance_metrics_json']:
+            row_dict['performance_metrics'] = json.loads(row_dict['performance_metrics_json'])
 
           results.append(row_dict)
     except Exception as e:
@@ -1678,6 +2083,12 @@ class ModuleStateTracker:
     return results
 
   def health_check(self) -> bool:
+    """
+    Performs a health check on the module.
+
+    Returns:
+        bool: True if the module is healthy, False otherwise.
+    """
     try:
       self.conn.execute("SELECT 1")
       return self.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='module_snapshots';").fetchone() is not None
@@ -1694,14 +2105,20 @@ class ModuleStateTracker:
 class MetaReflectionEngine:
   """Analyzes suggestion feedback and system logs to improve diagnostic strategies."""
   def __init__(self, bootstrapper: 'IntellisenseBootstrapper'):
+    """
+    Initializes the MetaReflectionEngine.
+
+    Args:
+        bootstrapper (IntellisenseBootstrapper): An instance of the bootstrapper.
+    """
     self.bootstrapper = bootstrapper
     self.embedding_provider = bootstrapper.embedding_provider
     self.interaction_count = 0
     self.reflection_threshold = self.bootstrapper.config.get('meta_reflection', {}).get('reflection_interval', 10)
     self.feedback_log_path = Path(self.bootstrapper.config.get('meta_reflection', {}).get('feedback_log_path', 'ai_suggestion_feedback.jsonl'))
-    self.assessment_file_path = Path("logs/assessments.jsonl") # This should be archived too if used.
+    self.assessment_file_path = Path("logs/assessments.jsonl")
     self.log_catalog_db_path = Path("intellisense_log_catalog.db")
-    self.synthesis_report_path = Path("logs/intellisense_data_synthesis_report.log") # This log file will be managed by MetaReflectionEngine
+    self.synthesis_report_path = Path("logs/intellisense_data_synthesis_report.log")
     self.last_reflection_content = ""
     self.last_processed_log_line = 0
     self.log_reflector_interval_sec = self.bootstrapper.config.get('meta_reflection', {}).get('log_reflector_interval_sec', 600)
@@ -1718,6 +2135,7 @@ class MetaReflectionEngine:
     self.last_log_scan_time = 0
 
   def _create_feedback_table(self):
+    """Creates the feedback log database table if it doesn't exist."""
     with self.conn:
       self.conn.execute("""
         CREATE TABLE IF NOT EXISTS feedback_log (
@@ -1734,6 +2152,7 @@ class MetaReflectionEngine:
     logger.info("Feedback log DB Table created/verified.")
 
   def _create_log_catalog_table(self):
+    """Creates the log catalog database table if it doesn't exist."""
     with self.log_catalog_conn:
       self.log_catalog_conn.execute("""
         CREATE TABLE IF NOT EXISTS log_catalog (
@@ -1766,6 +2185,16 @@ class MetaReflectionEngine:
     logger.info("Log catalog DB Table created/verified, new columns added if needed.")
 
   def store_feedback(self, user_input: str, ai_response: str, status: str, reward: float, user_id: str):
+    """
+    Stores developer feedback in the database and a log file.
+
+    Args:
+        user_input (str): The user's input.
+        ai_response (str): The AI's response.
+        status (str): The status of the feedback (e.g., 'accepted').
+        reward (float): The reward score for the feedback.
+        user_id (str): The ID of the user providing the feedback.
+    """
     feedback_fingerprint = hashlib.sha256(f"{user_input}{ai_response}{datetime.now(timezone.utc).isoformat()}".encode('utf-8')).hexdigest()
 
     with self.conn:
@@ -1783,6 +2212,17 @@ class MetaReflectionEngine:
     logger.debug(f"Stored feedback for user {user_id}, fingerprint: ...{feedback_fingerprint[-12:]}")
 
   def reflect(self, user_input: str, ai_response: str, user_id: str = "default") -> Optional[str]:
+    """
+    Performs a reflection cycle based on user feedback.
+
+    Args:
+        user_input (str): The user's input.
+        ai_response (str): The AI's response.
+        user_id (str, optional): The user's ID. Defaults to "default".
+
+    Returns:
+        Optional[str]: A summary of the reflection, or None.
+    """
     self.interaction_count += 1
     reflection_output = None
     if self.interaction_count % self.reflection_threshold == 0 and self.interaction_count > 0:
@@ -1810,7 +2250,12 @@ class MetaReflectionEngine:
   def _parse_structured_log_entry(self, content: str) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     Parses log content for structured values and determines a context category.
-    Returns a tuple of (parsed_values_dict, context_category_str).
+
+    Args:
+        content (str): The log entry content.
+
+    Returns:
+        A tuple containing a dictionary of parsed values and an optional context category string.
     """
     parsed_values: Dict[str, Any] = {}
     context_category: Optional[str] = None
@@ -1818,7 +2263,6 @@ class MetaReflectionEngine:
     advanced_parsers = self.bootstrapper.config.get('log_management', {}).get('advanced_parsers', [])
 
     for parser_config in advanced_parsers:
-      # parser_name = parser_config.get('name') # Not used
       regex_patterns = parser_config.get('regex', [])
       default_category = parser_config.get('context_category')
 
@@ -1827,7 +2271,6 @@ class MetaReflectionEngine:
         if match:
           for key, value in match.groupdict().items():
             try:
-              # Attempt to convert to appropriate types
               if isinstance(value, str) and '.' in value and value.replace('.', '', 1).isdigit():
                 parsed_values[key] = float(value)
               elif isinstance(value, str) and value.isdigit():
@@ -1836,18 +2279,26 @@ class MetaReflectionEngine:
                 parsed_values[key] = value
 
             except ValueError:
-              parsed_values[key] = value # Keep as string if conversion fails
+              parsed_values[key] = value
 
           if default_category:
             context_category = default_category
-          return parsed_values, context_category # Return first successful parse
+          return parsed_values, context_category
 
-    return parsed_values, context_category # Return empty if no match
+    return parsed_values, context_category
 
   def _assess_log_entry(self, content: str, source_file: Path) -> Dict[str, Any]:
     """
     Assesses a log entry, extracts features, and prepares it for cataloging.
-    Now includes structured parsing and enriched assessment.
+
+    This method includes structured parsing and an enriched assessment score.
+
+    Args:
+        content (str): The raw log entry content.
+        source_file (Path): The path to the log file.
+
+    Returns:
+        A dictionary of assessed log data.
     """
     level = "UNKNOWN"
     detected_keywords = []
@@ -1856,15 +2307,14 @@ class MetaReflectionEngine:
     log_ts = datetime.now(timezone.utc).isoformat()
     filtered_content = content
 
-    # Attempt to parse basic log info (timestamp, level)
     log_patterns = self.bootstrapper.config['log_management']['log_entry_patterns']
 
-    try: # Try JSONL format first
+    try:
       json_entry = json.loads(content)
       filtered_content = json_entry.get('message', content)
       level = json_entry.get('level', level).upper()
       log_ts = json_entry.get('timestamp', log_ts)
-    except json.JSONDecodeError: # Fallback to simple log patterns
+    except json.JSONDecodeError:
       match_simple_log = re.match(log_patterns.get("simple_log", r"^$"), content)
       if match_simple_log:
         groups = match_simple_log.groups()
@@ -1882,7 +2332,6 @@ class MetaReflectionEngine:
 
     parsed_values, context_category = self._parse_structured_log_entry(filtered_content)
 
-    # Apply keyword-based assessment to the *filtered* content (message part)
     content_for_keywords = filtered_content.lower()
     for k_type, keywords in self.diagnostic_keywords.items():
       for kw in keywords:
@@ -1925,6 +2374,7 @@ class MetaReflectionEngine:
     }
 
   def _store_log_entry_in_catalog(self, assessed_data: Dict[str, Any]):
+    """Stores an assessed log entry in the log catalog database."""
     try:
       with self.log_catalog_conn:
         self.log_catalog_conn.execute(
@@ -1949,18 +2399,14 @@ class MetaReflectionEngine:
 
   def _scan_and_ingest_log_file(self, log_file: Path):
     """
-    Reads a log file, assesses each line/entry, stores it in DB, and then moves the file to ARCHIVE.
-    Files from `logs/` directory only. `diagnostics.log` and `feedback.jsonl` are special cases.
+    Reads a log file, assesses each entry, stores it in the database, and archives the file.
     """
     if not log_file.exists():
       logger.warning(f"Log file not found: {log_file}")
       return
     
-    # Do not archive diagnostics.log or feedback.jsonl within this function's scope.
-    # diagnostics.log is handled by _main_ on boot. feedback.jsonl is managed internally.
     if log_file.name == "diagnostics.log" or log_file.name == "feedback.jsonl":
         logger.debug(f"Skipping archiving of persistent log file {log_file.name} within ingest_new_logs.")
-        # Just process its content, don't move it.
         try:
             with open(log_file, "r", encoding='utf-8', errors='ignore') as f:
                 for line in f:
@@ -1982,7 +2428,6 @@ class MetaReflectionEngine:
             assessed_data = self._assess_log_entry(stripped_line, log_file)
             self._store_log_entry_in_catalog(assessed_data)
       
-      # After successful ingestion, move the file to the ARCHIVE folder
       timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
       archive_name = ARCHIVE_FOLDER / f"{log_file.stem}_{timestamp}{log_file.suffix}"
       try:
@@ -2020,8 +2465,6 @@ class MetaReflectionEngine:
           processed_files.add(current_path)
       elif current_path.is_dir():
         for file_in_dir in current_path.rglob('*'):
-          # Only process log/text/jsonl files, ignore directories and other file types that are not logs.
-          # Also, ensure we don't try to move the synthesis report out until it has been used.
           if file_in_dir.is_file() and file_in_dir.suffix.lower() in ['.log', '.txt', '.json', '.jsonl'] and file_in_dir.name not in ["intellisense_data_synthesis_report.log", "intellisense_self_test_report.jsonl"]:
             if file_in_dir not in processed_files:
               self._scan_and_ingest_log_file(file_in_dir)
@@ -2034,8 +2477,14 @@ class MetaReflectionEngine:
 
   def rehydrate_log_data(self, criteria: Dict[str, Any], limit: int = 100) -> List[Dict[str, Any]]:
     """
-    Retrieves processed log data from the log_catalog based on specified criteria.
-    Criteria can include: log_level, category, parsed_values_json (partial match), timestamp range, etc.
+    Retrieves processed log data from the catalog based on specified criteria.
+
+    Args:
+        criteria (Dict[str, Any]): A dictionary of criteria to filter logs by.
+        limit (int, optional): The maximum number of logs to return. Defaults to 100.
+
+    Returns:
+        List[Dict[str, Any]]: A list of rehydrated log data dictionaries.
     """
     query = "SELECT * FROM log_catalog WHERE 1=1"
     params = []
@@ -2081,10 +2530,9 @@ class MetaReflectionEngine:
         column_names = [description[0] for description in cursor.description]
         for row in cursor.fetchall():
           row_dict = dict(zip(column_names, row))
-          # Convert JSON strings back to Python objects (handling None)
           row_dict['embedding'] = json.loads(row_dict['embedding_json']) if row_dict['embedding_json'] else None
-          row_dict['keywords'] = json.loads(row_dict['keywords']) if row_dict['keywords'] else [] # type: ignore
-          row_dict['parsed_values'] = json.loads(row_dict['parsed_values_json']) if row_dict['parsed_values_json'] else {} # type: ignore
+          row_dict['keywords'] = json.loads(row_dict['keywords']) if row_dict['keywords'] else []
+          row_dict['parsed_values'] = json.loads(row_dict['parsed_values_json']) if row_dict['parsed_values_json'] else {}
 
           results.append(row_dict)
     except Exception as e:
@@ -2094,7 +2542,14 @@ class MetaReflectionEngine:
   def verify_rehydration_process(self, rehydrated_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Analyzes rehydrated log data to verify its integrity and generate diagnostics.
-    This provides feedback to improve initial assessment.
+
+    This provides feedback to improve the initial assessment process.
+
+    Args:
+        rehydrated_data (List[Dict[str, Any]]): A list of rehydrated log data.
+
+    Returns:
+        Dict[str, Any]: A dictionary of verification metrics and diagnostics.
     """
     metrics: Dict[str, Any] = {
       "total_entries": len(rehydrated_data),
@@ -2162,7 +2617,15 @@ class MetaReflectionEngine:
   def generate_synthesis_report(self, similarity_threshold: float = 0.75) -> Path:
     """
     Compiles and combines similar log entries from the catalog into a synthesis report.
-    This report serves as self-generated training data.
+
+    This report can serve as self-generated training data for improving the system.
+
+    Args:
+        similarity_threshold (float, optional): The similarity threshold for
+            grouping log entries. Defaults to 0.75.
+
+    Returns:
+        Path: The path to the generated synthesis report.
     """
     if np is None:
       logger.error("NumPy not available, cannot generate synthesis report.")
@@ -2274,6 +2737,12 @@ class MetaReflectionEngine:
     return self.synthesis_report_path
 
   def health_check(self) -> bool:
+    """
+    Performs a health check on the module.
+
+    Returns:
+        bool: True if the module is healthy, False otherwise.
+    """
     try:
       self.conn.execute("SELECT 1")
       self.log_catalog_conn.execute("SELECT 1")
@@ -2295,24 +2764,43 @@ class MetaReflectionEngine:
 class ModuleOrchestrator:
   """Manages and monitors health of IntellisenseSystem modules."""
   def __init__(self, system_instance: 'IntellisenseSystem', module_state_tracker: ModuleStateTracker):
+    """
+    Initializes the ModuleOrchestrator.
+
+    Args:
+        system_instance (IntellisenseSystem): The main system instance.
+        module_state_tracker (ModuleStateTracker): The module state tracker.
+    """
     self.system = system_instance
-    self.modules: Dict[str, Any] = {} # Modules registered by IntellisenseSystem
+    self.modules: Dict[str, Any] = {}
     self.module_state_tracker = module_state_tracker
     self.last_snapshot_time = 0
     logger.info("ModuleOrchestrator initialized.")
 
   def register_modules(self, modules: Dict[str, Any]):
+    """
+    Registers modules for the orchestrator to monitor.
+
+    Args:
+        modules (Dict[str, Any]): A dictionary of modules to register.
+    """
     self.modules = modules
     logger.info(f"Registered {len(self.modules)} modules for monitoring.")
 
   def run_health_checks(self) -> Dict[str, str]:
-    health_status: Dict[str, str] = {} # Simplified to PASSED/FAILED/N/A
+    """
+    Runs health checks on all registered modules.
+
+    Returns:
+        Dict[str, str]: A dictionary of health check results.
+    """
+    health_status: Dict[str, str] = {}
     for name, module in self.modules.items():
       try:
         if hasattr(module, 'health_check') and callable(module.health_check):
           is_healthy = module.health_check()
           health_status[name] = "PASSED" if is_healthy else "FAILED"
-        else: # Modules without explicit health_check assumed to be healthy for this audit
+        else:
           health_status[name] = "N/A"
       except Exception as e:
         logger.error(f"Health check for module {name} failed: {e}")
@@ -2332,20 +2820,17 @@ class ModuleOrchestrator:
     for name, module in self.modules.items():
       snapshot_data: Dict[str, Any] = {
         "module_name": name,
-        "status": "UNKNOWN", # Default to UNKNOWN, updated below
-        # FIX: Access config from self.system.bootstrapper.config as ModuleOrchestrator itself doesn't have bootstrapper
-        "config_snapshot": {k:v for k,v in self.system.bootstrapper.config.items() if k not in ['diagnostic_keywords', 'memoria_ecosystem']} # Example subset of config
+        "status": "UNKNOWN",
+        "config_snapshot": {k:v for k,v in self.system.bootstrapper.config.items() if k not in ['diagnostic_keywords', 'memoria_ecosystem']}
       }
       try:
-        # Get health status
         is_healthy = False
         if hasattr(module, 'health_check') and callable(module.health_check):
           is_healthy = module.health_check()
           snapshot_data['status'] = "ACTIVE" if is_healthy else "ERROR"
         else:
-          snapshot_data['status'] = "ACTIVE" # Assume active if no health_check
+          snapshot_data['status'] = "ACTIVE"
 
-        # Get operational metrics
         if hasattr(module, 'get_operational_metrics') and callable(module.get_operational_metrics):
           operational_metrics = module.get_operational_metrics()
           snapshot_data.update(operational_metrics)
@@ -2355,7 +2840,6 @@ class ModuleOrchestrator:
             "success_rate": -1.0, "avg_latency_ms": -1.0
           })
 
-        # Check for last_error_message if module has it
         if hasattr(module, 'last_error_message'):
           snapshot_data['last_error_message'] = module.last_error_message
         else:
@@ -2373,32 +2857,40 @@ class ModuleOrchestrator:
     logger.info("Module state snapshot completed.")
 
   def health_check(self) -> bool:
-    return bool(self.modules) # Basic check if modules are registered
+    """
+    Performs a health check on the module.
+
+    Returns:
+        bool: True if the module is healthy, False otherwise.
+    """
+    return bool(self.modules)
 
 
 class IntellisenseSystem:
-  """Main class integrating all components of the IntellisenseSystem."""
+  """
+    The main class for the Citadel Dossier System's Adaptive Intellisense Core.
+
+    This class integrates all the other components of the system to provide
+    AI-driven assistance for software development.
+    """
   def __init__(self):
+    """Initializes the IntellisenseSystem and all its sub-modules."""
     self.bootstrapper = IntellisenseBootstrapper()
-    self.module_state_tracker = ModuleStateTracker(Path("intellisense_feedback.db")) # Reuse feedback DB
+    self.module_state_tracker = ModuleStateTracker(Path("intellisense_feedback.db"))
     self.modules = {
       'CodebaseHealthModeler': CodebaseHealthModeler(self.bootstrapper),
       'DeveloperPersonaEngine': DeveloperPersonaEngine(self.bootstrapper),
       'DiagnosticUrgencySystem': DiagnosticUrgencySystem(self.bootstrapper),
       'MetaReflectionEngine': MetaReflectionEngine(self.bootstrapper),
     }
-    # ModuleOrchestrator needs access to `self.modules` so initialize it last among modules
     self.modules['ModuleOrchestrator'] = ModuleOrchestrator(self, self.module_state_tracker)
 
     if self.bootstrapper.config.get('memoria_ecosystem', {}).get('enabled', False):
       try:
-        # Use the locally defined MemoriaCore and other Memoria classes
-        memoria_core = MemoriaCore() # Direct instantiation as it's defined in this file
+        memoria_core = MemoriaCore()
         memoria_core_config = memoria_core.config
 
-        # These are also locally defined in this file (MemoriaSelfReflection, etc.)
-        # The MemoriaCore's initialize method will handle their instantiation based on its config
-        memoria_core.initialize({}) # This will load sub-modules based on memoria_config.json
+        memoria_core.initialize({})
         self.modules['MemoriaCore'] = memoria_core
       except Exception as e:
         logger.error(f"An error occurred during Memoria ecosystem initialization: {e}")
@@ -2411,6 +2903,7 @@ class IntellisenseSystem:
     logger.info("IntellisenseSystem initialized.")
 
   def _get_reward(self, feedback_text: str) -> float:
+    """Calculates a reward score based on feedback text."""
     text = feedback_text.lower()
     if any(w in text for w in ['thanks', 'perfect', 'great', 'correct', 'good job']):
       return 10.0
@@ -2421,6 +2914,17 @@ class IntellisenseSystem:
     return 0.0
 
   def process_input(self, user_input: str, code_metrics: Dict[str, Any], user_id: str = "default") -> str:
+    """
+    Processes user input to provide AI-driven suggestions and analysis.
+
+    Args:
+        user_input (str): The natural language query from the developer.
+        code_metrics (Dict[str, Any]): A dictionary of code statistics.
+        user_id (str, optional): An identifier for the user. Defaults to "default".
+
+    Returns:
+        str: The AI-generated response.
+    """
     start_time = time.time()
 
     log_management_config = self.bootstrapper.config.get('log_management', {})
@@ -2442,7 +2946,6 @@ class IntellisenseSystem:
       else:
         logger.debug("Skipping periodic synthesis report. Interval not met.")
 
-    # NEW: Periodic Module State Snapshot
     module_tracking_config = self.bootstrapper.config.get('module_tracking', {})
     if module_tracking_config.get('enabled', False):
       tracking_interval = module_tracking_config.get('tracking_interval_sec', 60)
@@ -2453,12 +2956,10 @@ class IntellisenseSystem:
       else:
         logger.debug("Skipping periodic module state snapshot. Interval not met.")
 
-    # System Monitoring (if psutil is available) - Now instrumented via Operational Metrics
     if psutil:
       try:
         cpu_usage = psutil.cpu_percent(interval=None)
         memory_usage = psutil.virtual_memory().percent
-        # This could be added to performance_metrics_json in ModuleStateTracker for SystemMonitoring module
         logger.info(f"System resources - CPU: {cpu_usage:.1f}%, Memory: {memory_usage:.1f}%")
         if cpu_usage > self.bootstrapper.config['system_monitoring']['cpu_threshold']:
           logger.warning("High CPU usage detected.")
@@ -2535,6 +3036,12 @@ class IntellisenseSystem:
     return shaped_response
 
   def run_self_test(self) -> Dict[str, Any]:
+    """
+    Runs a suite of self-diagnostic tests on the system.
+
+    Returns:
+        Dict[str, Any]: A dictionary of test results.
+    """
     logger.info("Running IntellisenseSystem self-diagnostic tests...")
     detailed_test_results: Dict[str, Any] = {
       "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -2542,7 +3049,6 @@ class IntellisenseSystem:
       "tests": {}
     }
 
-    # Helper for recording individual test results
     def record_test(test_name: str, status: str, message: str, details: Optional[Dict] = None, severity: str = "INFO", recommendation: Optional[str] = None):
       res_details = details or {}
       details = {"message": message, "details": res_details}
@@ -2561,7 +3067,6 @@ class IntellisenseSystem:
         logger.info(f"Self-test [{test_name}] PASSED: {message}")
 
 
-    # 1. Module Health Checks
     try:
       module_health_status = self.modules['ModuleOrchestrator'].run_health_checks()
       record_test("module_health_check",
@@ -2575,14 +3080,12 @@ class IntellisenseSystem:
                   details={"error": str(e), "traceback": traceback.format_exc()},
                   severity="CRITICAL", recommendation="Check ModuleOrchestrator implementation.")
 
-    # 2. Configuration Loading Status
     record_test("config_loading",
                 "PASS" if bool(self.bootstrapper.config) else "FAIL",
                 "System configuration loaded successfully." if bool(self.bootstrapper.config) else "Failed to load system configuration.",
                 severity="INFO" if bool(self.bootstrapper.config) else "CRITICAL",
                 recommendation="Check intellisense_config.json file for existence and syntax." if not bool(self.bootstrapper.config) else None)
 
-    # 3. Embedding Provider Functionality
     try:
       test_embedding = self.bootstrapper.embedding_provider.get_embedding("self-test-embedding-string")
       if test_embedding and len(test_embedding) == self.bootstrapper.config['embedding_dimension']:
@@ -2597,7 +3100,6 @@ class IntellisenseSystem:
                   details={"error": str(e), "traceback": traceback.format_exc()}, severity="CRITICAL",
                   recommendation="Ensure sentence-transformers is installed and model loads correctly.")
 
-    # 4. Codebase Health Model Verification
     codebase_health_status = "SKIPPED"
     codebase_health_message = "NumPy not available, codebase health modeling skipped."
     codebase_health_severity = "INFO"
@@ -2627,7 +3129,6 @@ class IntellisenseSystem:
     record_test("codebase_health_model_verification", codebase_health_status, codebase_health_message,
                 details=codebase_health_details, severity=codebase_health_severity, recommendation=codebase_health_recommendation)
 
-    # 5. Feedback Database Access
     try:
       self.modules['MetaReflectionEngine'].conn.execute("SELECT 1").fetchone()
       record_test("feedback_db_access", "PASS", "Feedback database is accessible.", severity="INFO")
@@ -2636,7 +3137,6 @@ class IntellisenseSystem:
                   details={"error": str(e), "traceback": traceback.format_exc()}, severity="CRITICAL",
                   recommendation="Check intellisense_feedback.db file permissions or SQLite installation.")
 
-    # 6. Log Catalog Database Access & Functionality
     try:
       self.modules['MetaReflectionEngine'].log_catalog_conn.execute("SELECT 1").fetchone()
       record_test("log_catalog_db_access", "PASS", "Log catalog database is accessible.", severity="INFO")
@@ -2664,7 +3164,6 @@ class IntellisenseSystem:
       record_test("log_catalog_rehydration_verification", "FAIL", "DB not accessible for verification.", severity="CRITICAL")
 
 
-    # 7. Synthesis Report Generation
     try:
       synthesis_path = self.modules['MetaReflectionEngine'].generate_synthesis_report(similarity_threshold=0.9)
       if synthesis_path.exists() and synthesis_path.stat().st_size > 0:
@@ -2679,7 +3178,6 @@ class IntellisenseSystem:
                   details={"error": str(e), "traceback": traceback.format_exc()}, severity="CRITICAL",
                   recommendation="Check MetaReflectionEngine.generate_synthesis_report implementation and log data availability.")
 
-    # 8. Memoria Ecosystem Verification (for external files)
     try:
       memoria_checks = self.bootstrapper.diagnostics.run_diagnostics(
         [
@@ -2691,7 +3189,6 @@ class IntellisenseSystem:
             self.bootstrapper.memoria_ecosystem_path / 'analysis_interface.py',
         ],
         [
-            # These verify the external files can be imported as modules by Python itself
             (self.bootstrapper.memoria_ecosystem_path / 'memoria_module.py', 'ecosystem.memoria.memoria_module'),
             (self.bootstrapper.memoria_ecosystem_path / 'memoria_core.py', 'ecosystem.memoria.memoria_core'),
             (self.bootstrapper.memoria_ecosystem_path / 'self_reflection.py', 'ecosystem.memoria.self_reflection'),
@@ -2700,7 +3197,6 @@ class IntellisenseSystem:
         ]
       )
 
-      # Check if all modules were successfully verified
       all_memoria_modules_passed = all(memoria_checks.values())
       memoria_overall_status = "PASS" if all_memoria_modules_passed else "FAIL"
       memoria_severity = "INFO" if all_memoria_modules_passed else "WARNING"
@@ -2718,7 +3214,6 @@ class IntellisenseSystem:
                   recommendation="Ensure Memoria ecosystem files exist and are syntactically correct, and all dependencies are met for their external imports.")
 
 
-    # 9. System Resource Monitoring (Real functionality test)
     if psutil:
       try:
         cpu_before = psutil.cpu_percent(interval=None)
@@ -2728,7 +3223,7 @@ class IntellisenseSystem:
         if cpu_after is not None and memory_usage is not None:
           record_test("system_resource_monitoring", "PASS", "System resource monitoring functional.",
                       details={"cpu_percent_sampled": cpu_after, "memory_percent": memory_usage}, severity="INFO")
-        else: # psutil might be installed but not return values on some systems/configs
+        else:
           record_test("system_resource_monitoring", "FAIL", "psutil installed but could not retrieve valid resource data.",
                       details={"cpu_after": cpu_after, "memory_usage": memory_usage}, severity="WARNING", recommendation="Check psutil permissions/configuration.")
       except Exception as e:
@@ -2739,12 +3234,11 @@ class IntellisenseSystem:
       record_test("system_resource_monitoring", "SKIPPED", "psutil not found, system resource monitoring skipped.", severity="INFO",
                   recommendation="Install psutil for system resource insights.")
 
-    # 10. Module State Tracking Functionality
     try:
-      self.modules['ModuleOrchestrator'].snapshot_all_modules_state() # Force a snapshot
+      self.modules['ModuleOrchestrator'].snapshot_all_modules_state()
       latest_snapshots = self.module_state_tracker.retrieve_latest_snapshots(limit=len(self.modules))
-      if latest_snapshots and len(latest_snapshots) >= len(self.modules): # Expect at least one snapshot per module
-        has_valid_metrics = any(s.get('invocations', 0) > -1 for s in latest_snapshots) # Check if operational metrics are collected
+      if latest_snapshots and len(latest_snapshots) >= len(self.modules):
+        has_valid_metrics = any(s.get('invocations', 0) > -1 for s in latest_snapshots)
         if has_valid_metrics:
           record_test("module_state_tracking", "PASS", "Module state tracking and snapshot recording functional.",
                       details={"num_snapshots": len(latest_snapshots)}, severity="INFO")
@@ -2782,8 +3276,6 @@ class IntellisenseSystem:
       """Performs a graceful shutdown of all IntellisenseSystem modules."""
       logger.info("Initiating IntellisenseSystem modules shutdown...")
       for name, module in self.modules.items():
-          # ModuleOrchestrator is a special case as it calls on other modules, so no explicit shutdown for it here
-          # MemoriaCore too, has its own internal shutdown if enabled
           if name not in ['ModuleOrchestrator', 'MemoriaCore'] and hasattr(module, 'shutdown') and callable(module.shutdown):
               try:
                   module.shutdown()
@@ -2791,12 +3283,8 @@ class IntellisenseSystem:
               except Exception as e:
                   logger.error(f"Error during shutdown of module {name}: {e}")
       
-      # Special handling for MemoriaCore if enabled
       if 'MemoriaCore' in self.modules:
           memoria_core_module = self.modules['MemoriaCore']
-          # Check for internal shutdown method or close its own db connections if any
-          # MemoriaCore primarily orchestrates, its sub-modules might have direct DBs or resources
-          # if MemoriaCore needs a shutdown too, add its specific logic here
           logger.info("MemoriaCore (internal instance) does not require explicit shutdown, its sub-modules manage themselves.")
 
 
@@ -2813,33 +3301,29 @@ class IntellisenseSystem:
       print("-----------------------------------")
       return
 
-    # Prepare data for grid
     headers = ["Module", "Status", "Health", "Invocations", "Success Rate", "Avg Latency (ms)", "Last Error"]
     rows = []
 
-    # Determine column widths dynamically
     col_widths = {header: len(header) for header in headers}
 
     for snapshot in latest_snapshots:
       module_name = snapshot.get('module_name', 'N/A')
       status = snapshot.get('status', 'N/A')
-      # Note: This attempts to get the health status from the live module object
       health_status_obj = self.modules.get(module_name)
       if health_status_obj and hasattr(health_status_obj, 'health_check') and callable(health_status_obj.health_check):
           try:
               is_healthy = health_status_obj.health_check()
               health_status_str = "HEALTHY" if is_healthy is True else ("UNHEALTHY" if is_healthy is False else "N/A_FUNC")
           except Exception:
-              health_status_str = "ERROR_CHECK" # Indicate health_check itself failed
+              health_status_str = "ERROR_CHECK"
       else:
-          health_status_str = "N/A_MOD" # Module has no health_check method
+          health_status_str = "N/A_MOD"
 
       invocations = snapshot.get('invocations', 0)
       success_rate = f"{snapshot.get('success_rate', 0.0)*100:.1f}%" if snapshot.get('invocations', 0) > 0 else "N/A"
       avg_latency = f"{snapshot.get('avg_latency_ms', 0.0):.2f}" if snapshot.get('invocations') else "N/A"
       last_error = snapshot.get('last_error_message', '') or ''
 
-      # Truncate strings for display
       module_name_display = (module_name[:18] + '..') if len(module_name) > 20 else module_name
       last_error_display = (last_error[:18] + '..') if len(last_error) > 20 else last_error
 
@@ -2853,23 +3337,19 @@ class IntellisenseSystem:
         "Last Error": last_error_display
       })
 
-      # Update max widths
       for i, header in enumerate(headers):
         col_widths[header] = max(col_widths[header], len(rows[-1][header]))
 
-    # Print Grid
     print("\n" + "=" * (sum(col_widths.values()) + len(headers) * 3 + 1))
     print("IntelliSense System Operational Snapshot Audit".center(sum(col_widths.values()) + len(headers) * 3 + 1))
     print("=" * (sum(col_widths.values()) + len(headers) * 3 + 1))
 
-    # Header Row
     header_line = "│"
     for header in headers:
       header_line += f" {header:<{col_widths[header]}} │"
     print(header_line)
-    print("├" + "─" * (sum(col_widths.values()) + len(headers) * 3 - 1) + "┤") # Separator line
+    print("├" + "─" * (sum(col_widths.values()) + len(headers) * 3 - 1) + "┤")
 
-    # Data Rows
     for row_data in rows:
       data_line = "│"
       for header in headers:

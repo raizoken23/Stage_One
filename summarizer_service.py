@@ -128,7 +128,16 @@ if not _backoff_event_logger.hasHandlers() and not logger.hasHandlers(): # Only 
 
 # --- Base LLM Provider Interface ---
 class BaseLLMProvider(ABC):
+    """Abstract base class for Large Language Model (LLM) providers."""
     def __init__(self, provider_config: Dict[str, Any], service_name: str, key_manager_instance: Optional[KeyManager]):
+        """
+        Initializes the BaseLLMProvider.
+
+        Args:
+            provider_config (Dict[str, Any]): Configuration for the provider.
+            service_name (str): The name of the service.
+            key_manager_instance (Optional[KeyManager]): An instance of the KeyManager.
+        """
         self.provider_config = provider_config
         self.service_name = service_name
         self.key_manager = key_manager_instance
@@ -138,6 +147,7 @@ class BaseLLMProvider(ABC):
 
     @abstractmethod
     def initialize_client(self) -> bool:
+        """Initializes the API client for the provider."""
         pass
 
     @abstractmethod
@@ -145,14 +155,42 @@ class BaseLLMProvider(ABC):
         self, prompt: str, model_name: str, max_tokens: int, temperature: float,
         stop_sequences: Optional[List[str]] = None,
     ) -> Tuple[Optional[str], Dict[str, Any]]:
+        """
+        Generates a response from the LLM.
+
+        Args:
+            prompt (str): The prompt to send to the LLM.
+            model_name (str): The name of the model to use.
+            max_tokens (int): The maximum number of tokens to generate.
+            temperature (float): The temperature for the generation.
+            stop_sequences (Optional[List[str]], optional): A list of stop sequences.
+                Defaults to None.
+
+        Returns:
+            A tuple containing the generated text and a dictionary of metrics.
+        """
         pass
 
     def is_ready(self) -> bool:
+        """
+        Checks if the provider is ready to use.
+
+        Returns:
+            bool: True if the provider is ready, False otherwise.
+        """
         return self.is_configured
 
 # --- OpenAI Provider Implementation ---
 class OpenAIProvider(BaseLLMProvider):
+    """An LLM provider for OpenAI models."""
     def __init__(self, provider_config_dict: Dict[str, Any], key_manager_instance: Optional[KeyManager]): 
+        """
+        Initializes the OpenAIProvider.
+
+        Args:
+            provider_config_dict (Dict[str, Any]): Configuration for the provider.
+            key_manager_instance (Optional[KeyManager]): An instance of the KeyManager.
+        """
         super().__init__(provider_config_dict, "OpenAI", key_manager_instance)
 
         self.client: Optional[OpenAI] = None
@@ -168,6 +206,12 @@ class OpenAIProvider(BaseLLMProvider):
         self.initialize_client()
 
     def initialize_client(self) -> bool:
+        """
+        Initializes the OpenAI API client.
+
+        Returns:
+            bool: True if the client was initialized successfully, False otherwise.
+        """
         api_key_value: Optional[str] = None
         if self.key_manager:
             key_data = self.key_manager.get_key(self.service_tag_for_key)
@@ -210,7 +254,7 @@ class OpenAIProvider(BaseLLMProvider):
         (RateLimitError, APIConnectionError, APIError), 
         max_tries=3, 
         jitter=backoff.full_jitter, 
-        logger=_BACKOFF_LOGGER_NAME,  # Use the string name for the logger
+        logger=_BACKOFF_LOGGER_NAME,
         on_backoff=lambda details: logging.getLogger(details.get('logger') or _BACKOFF_LOGGER_NAME).warning(
             f"Backing off {details['wait']:.1f}s after {details['tries']} tries calling {details['target'].__name__} due to {details['exception']}"
         ),
@@ -223,6 +267,20 @@ class OpenAIProvider(BaseLLMProvider):
         self, prompt: str, model_name: str, max_tokens: int, temperature: float,
         stop_sequences: Optional[List[str]] = None
     ) -> Tuple[Optional[str], Dict[str, Any]]:
+        """
+        Generates a response from the OpenAI API.
+
+        Args:
+            prompt (str): The prompt to send to the LLM.
+            model_name (str): The name of the model to use.
+            max_tokens (int): The maximum number of tokens to generate.
+            temperature (float): The temperature for the generation.
+            stop_sequences (Optional[List[str]], optional): A list of stop sequences.
+                Defaults to None.
+
+        Returns:
+            A tuple containing the generated text and a dictionary of metrics.
+        """
         if not self.is_ready() or not self.client:
             logger.error("OpenAIProvider.generate: Provider not ready or client not initialized.")
             return None, {"error": "OpenAIProvider not ready or client not initialized."}
@@ -291,6 +349,7 @@ class OpenAIProvider(BaseLLMProvider):
 
 
 class SummarizerService:
+    """A service for generating summaries of text using an LLM."""
     _cache: Dict[str, Tuple[Optional[str], Dict[str, Any]]] = {} 
     _cache_max_size: int = 1000 
 
@@ -298,13 +357,23 @@ class SummarizerService:
                  config: Optional[SummarizerServiceConfigSchema] = None, 
                  key_manager: Optional[KeyManager] = None,
                  system_config_parent: Optional[DossierSystemConfigSchema] = None):
-        
+        """
+        Initializes the SummarizerService.
+
+        Args:
+            config (Optional[SummarizerServiceConfigSchema], optional): Configuration
+                for the service. Defaults to None.
+            key_manager (Optional[KeyManager], optional): An instance of the
+                KeyManager. Defaults to None.
+            system_config_parent (Optional[DossierSystemConfigSchema], optional):
+                The parent system configuration. Defaults to None.
+        """
         if config:
             self.service_config = config
         elif CDS_IMPORTS_OK and SummarizerServiceConfigSchema:
             self.service_config = SummarizerServiceConfigSchema()
         else: 
-            self.service_config = SummarizerServiceConfigSchema(**{}) # type: ignore 
+            self.service_config = SummarizerServiceConfigSchema(**{})
 
         self.key_manager = key_manager
         self.system_config_parent = system_config_parent 
@@ -312,8 +381,8 @@ class SummarizerService:
         self.active_provider: Optional[BaseLLMProvider] = None
         
         self.default_provider_name: str = getattr(self.service_config, 'default_provider', 'openai')
-        self._cache_max_size = int(getattr(self.service_config, 'cache_max_size', self._cache_max_size)) # Ensure int
-        self.enable_caching_flag = bool(getattr(self.service_config, 'enable_caching', True)) # Ensure bool
+        self._cache_max_size = int(getattr(self.service_config, 'cache_max_size', self._cache_max_size))
+        self.enable_caching_flag = bool(getattr(self.service_config, 'enable_caching', True))
 
         logger.info(f"Initializing SummarizerService (Provider: {self.default_provider_name}). Cache Enabled: {self.enable_caching_flag}, Cache Max Size: {self._cache_max_size}")
 
@@ -326,7 +395,7 @@ class SummarizerService:
                "openai" in self.system_config_parent.service_endpoints:
                 
                 openai_ep_config_obj = self.system_config_parent.service_endpoints.get("openai")
-                if openai_ep_config_obj and isinstance(openai_ep_config_obj, PydanticBaseModelImport): # Check against imported Pydantic
+                if openai_ep_config_obj and isinstance(openai_ep_config_obj, PydanticBaseModelImport):
                      openai_ep_config_dict = openai_ep_config_obj.model_dump(exclude_none=True)
                      logger.debug(f"Summarizer: OpenAI endpoint config from system_config_parent (Pydantic): {openai_ep_config_dict}")
                 elif isinstance(openai_ep_config_obj, dict): 
@@ -352,9 +421,16 @@ class SummarizerService:
             logger.info(f"SummarizerService initialized successfully. Active provider: {provider_name}, Default Model: {model_name}")
 
     def is_available(self) -> bool:
+        """
+        Checks if the service is available and ready.
+
+        Returns:
+            bool: True if the service is available, False otherwise.
+        """
         return self.active_provider is not None and self.active_provider.is_ready()
 
     def _generate_cache_key(self, text: str, model: str, prompt_template_id: str, context_hash: str, target_tokens: int, temp: float) -> str:
+        """Generates a cache key for a given request."""
         key_material = f"{text}|{model}|{prompt_template_id}|{context_hash}|{target_tokens}|{temp}"
         if CDS_IMPORTS_OK and callable(create_deterministic_fingerprint):
             return create_deterministic_fingerprint(key_material, length=32)
@@ -362,10 +438,12 @@ class SummarizerService:
 
 
     def _get_from_cache(self, cache_key: str) -> Optional[Tuple[Optional[str], Dict[str, Any]]]:
+        """Gets a result from the cache."""
         if cache_key in self._cache: logger.debug(f"Cache hit for key: {cache_key}"); return self._cache[cache_key]
         logger.debug(f"Cache miss for key: {cache_key}"); return None
 
     def _put_in_cache(self, cache_key: str, summary: Optional[str], metrics: Dict[str, Any]):
+        """Puts a result in the cache."""
         if len(self._cache) >= self._cache_max_size:
             try: self._cache.pop(next(iter(self._cache))); logger.debug("Cache full, evicted oldest item.")
             except StopIteration: pass
@@ -373,6 +451,7 @@ class SummarizerService:
         self._cache[cache_key] = (summary, metrics); logger.debug(f"Cached result for key: {cache_key}")
 
     def _build_default_prompt(self, text_segment: str, domain: str, tier: str) -> str:
+        """Builds a default prompt for the summarization task."""
         return (
             "You are an expert summarization assistant tasked with creating a concise reflection digest "
             "for an entry in a knowledge dossier. Focus on extracting the core essence, key insights, "
@@ -391,7 +470,7 @@ class SummarizerService:
     def generate_digest(
         self,
         text_to_summarize: str,
-        context_metadata: Optional[Union[Dict[str, Any], VDPacketDataSchema]] = None, # Used string hint for schema
+        context_metadata: Optional[Union[Dict[str, Any], VDPacketDataSchema]] = None,
         max_input_chars_override: Optional[int] = None,
         target_summary_tokens_override: Optional[int] = None,
         model_name_override: Optional[str] = None,
@@ -400,7 +479,30 @@ class SummarizerService:
         prompt_template_id: str = "default_v1",
         use_cache: bool = True,
     ) -> Tuple[Optional[str], Dict[str, Any]]:
-        
+        """
+        Generates a summary digest for the given text.
+
+        Args:
+            text_to_summarize (str): The text to summarize.
+            context_metadata (Optional[Union[Dict[str, Any], VDPacketDataSchema]], optional):
+                Metadata to provide context for the summarization. Defaults to None.
+            max_input_chars_override (Optional[int], optional): The maximum number of
+                input characters to use. Defaults to None.
+            target_summary_tokens_override (Optional[int], optional): The target number
+                of tokens for the summary. Defaults to None.
+            model_name_override (Optional[str], optional): The name of the model to
+                use. Defaults to None.
+            temperature_override (Optional[float], optional): The temperature for the
+                generation. Defaults to None.
+            custom_prompt_template (Optional[str], optional): A custom prompt template
+                to use. Defaults to None.
+            prompt_template_id (str, optional): The ID of a predefined prompt
+                template to use. Defaults to "default_v1".
+            use_cache (bool, optional): Whether to use the cache. Defaults to True.
+
+        Returns:
+            A tuple containing the generated summary and a dictionary of metrics.
+        """
         provider_name_for_metrics = self.active_provider.service_name if self.active_provider else "N/A"
         if not self.is_available() or not self.active_provider:
             msg = "SummarizerService is not available or provider not ready."
@@ -422,7 +524,7 @@ class SummarizerService:
         if context_metadata:
             if CDS_IMPORTS_OK and VDPacketDataSchema and isinstance(context_metadata, VDPacketDataSchema):
                 domain_str = context_metadata.domain_primary or "general"; context_fingerprint_material["domain"] = domain_str
-                tier_str = getattr(context_metadata, 'vault_tier', "N/A") # Example
+                tier_str = getattr(context_metadata, 'vault_tier', "N/A")
                 context_fingerprint_material["tier"] = tier_str
             elif isinstance(context_metadata, dict):
                 domain_str = str(context_metadata.get("domain_primary", context_metadata.get("domain", "general")))

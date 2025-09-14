@@ -148,11 +148,18 @@ DEFAULT_EMBEDDING_DIM_FMS = getattr(cds_constants, 'DEFAULT_EMBEDDING_DIM', 1536
 
 class FAISSManagementService:
     """
-    FAISS Management Service (FMS)
-    ---------------------------------
-    - Wraps VectorStorageService with higher-level FAISS index management
-    - Optionally integrates GlobalMetadataTracker for metadata operations
-    - Emits GuardianLogger CAPS/SRS-compliant telemetry for observability
+    Manages FAISS vector indexes by providing a high-level API.
+
+    This service acts as an orchestration layer on top of a VectorStorageService,
+    delegating all low-level FAISS interactions to it. It can also integrate
+    with a GlobalMetadataTracker to manage richer metadata associated with vectors.
+
+    Attributes:
+        system_config (Union[DossierSystemConfigSchema, Dict[str, Any]]): The system
+            configuration object or dictionary.
+        vss (VectorStorageService): The underlying vector storage service instance.
+        global_tracker (Optional[GlobalMetadataTracker]): An optional instance of
+            the global metadata tracker.
     """
 
     def __init__(
@@ -161,6 +168,22 @@ class FAISSManagementService:
         vector_storage_service: VectorStorageService,
         global_tracker_instance: Optional[GlobalMetadataTracker] = None
     ):
+        """
+        Initializes the FAISSManagementService.
+
+        Args:
+            system_config (Union[DossierSystemConfigSchema, Dict[str, Any]]): The
+                system configuration.
+            vector_storage_service (VectorStorageService): An initialized instance
+                of the VectorStorageService.
+            global_tracker_instance (Optional[GlobalMetadataTracker], optional): An
+                optional instance of the GlobalMetadataTracker. Defaults to None.
+
+        Raises:
+            ImportError: If critical Citadel modules or the FAISS library are
+                not available.
+            TypeError: If `vector_storage_service` is not a valid instance.
+        """
         # ----------------------------------------------------------------------
         # 0) Defensive Checks
         # ----------------------------------------------------------------------
@@ -265,16 +288,17 @@ class FAISSManagementService:
     # ----------------------------------------------------------------------
     def is_ready(self) -> bool:
         """
-        Returns True if FMS is ready:
-        - VSS initialized successfully
-        - FAISS library available
-        - Optional: Global tracker doesn't block readiness
+        Checks if the service and its dependencies are ready.
+
+        Returns:
+            bool: True if the service is ready to use, False otherwise.
         """
         ready = getattr(self.vss, "_initialized_successfully", False) and VSS_FAISS_AVAILABLE
         logger.debug(f"[F956][CAPS:FMS_READY] FAISSManagementService.is_ready -> {ready}")
         return ready
 
     def _preprocess_vector_input(self, vector: np.ndarray, fingerprint: str, operation: str) -> Optional[List[float]]:
+        """Preprocesses and validates a NumPy vector input."""
         if not NUMPY_AVAILABLE or np is None:
              logger.error(f"FMS {operation} Error: NumPy not available for vector processing for '{fingerprint}'."); return None
         if not isinstance(vector, np.ndarray):
@@ -293,6 +317,21 @@ class FAISSManagementService:
 
     def add_vector(self, index_name: str, fingerprint: str, vector: np.ndarray, metadata: Optional[Dict[str, Any]] = None,
                    save_after: bool = True) -> bool:
+        """
+        Adds a vector to a specified FAISS index.
+
+        Args:
+            index_name (str): The name of the index to add the vector to.
+            fingerprint (str): A unique identifier for the vector.
+            vector (np.ndarray): The vector to add, as a NumPy array.
+            metadata (Optional[Dict[str, Any]], optional): Metadata to associate
+                with the vector. Defaults to None.
+            save_after (bool, optional): Whether to save the index to disk after
+                adding the vector. Defaults to True.
+
+        Returns:
+            bool: True if the vector was added successfully, False otherwise.
+        """
         logger.debug(f"FMS: Add vector attempt for FP '{fingerprint}' in index '{index_name}'.")
         vector_list = self._preprocess_vector_input(vector, fingerprint, "Add")
         if vector_list is None: return False
@@ -316,6 +355,22 @@ class FAISSManagementService:
     def search_vectors(self, index_name: str, query_vector: np.ndarray, k: int = 5,
                        filter_metadata_fn: Optional[Callable[[Dict[str, Any]], bool]] = None
                        ) -> List[Tuple[str, float, Dict[str, Any]]]:
+        """
+        Searches for the most similar vectors in a specified index.
+
+        Args:
+            index_name (str): The name of the index to search in.
+            query_vector (np.ndarray): The vector to search for.
+            k (int, optional): The number of nearest neighbors to return.
+                Defaults to 5.
+            filter_metadata_fn (Optional[Callable[[Dict[str, Any]], bool]], optional):
+                A function to filter results based on metadata. Defaults to None.
+
+        Returns:
+            List[Tuple[str, float, Dict[str, Any]]]: A list of tuples, where each
+                tuple contains the fingerprint, similarity score, and metadata of a
+                matching vector.
+        """
         logger.debug(f"FMS: Search request in index '{index_name}' for top {k} vectors.")
         query_list = self._preprocess_vector_input(query_vector, "query_vector", "Search")
         if query_list is None: return []
@@ -327,6 +382,17 @@ class FAISSManagementService:
         return results
 
     def reconstruct_vector(self, index_name: str, fingerprint: str) -> Optional[np.ndarray]:
+        """
+        Reconstructs a vector from an index using its fingerprint.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The fingerprint of the vector to reconstruct.
+
+        Returns:
+            Optional[np.ndarray]: The reconstructed vector as a NumPy array, or
+                None if not found.
+        """
         logger.debug(f"FMS: Reconstruct request for FP '{fingerprint}' in index '{index_name}'.")
         reconstructed_vec_np = self.vss.get_vector_by_fingerprint(index_name=index_name, fingerprint=fingerprint)
         if reconstructed_vec_np is None:
@@ -336,6 +402,16 @@ class FAISSManagementService:
         return reconstructed_vec_np
 
     def get_vector_metadata(self, index_name: str, fingerprint: str) -> Optional[Dict[str,Any]]:
+        """
+        Retrieves the metadata for a specific vector.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The fingerprint of the vector.
+
+        Returns:
+            Optional[Dict[str,Any]]: The metadata dictionary, or None if not found.
+        """
         logger.debug(f"FMS: Get metadata request for FP '{fingerprint}' in index '{index_name}'.")
         # This gets metadata stored by VSS (which includes what FMS passed to VSS during add)
         vss_metadata = self.vss.get_metadata(index_name=index_name, fingerprint=fingerprint)
@@ -351,12 +427,37 @@ class FAISSManagementService:
         return vss_metadata
 
     def update_vector_metadata(self, index_name: str, fingerprint: str, updates: Dict[str, Any], save_after: bool = True) -> bool:
+        """
+        Updates the metadata for a specific vector.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The fingerprint of the vector to update.
+            updates (Dict[str, Any]): A dictionary of metadata fields to update.
+            save_after (bool, optional): Whether to save the index after the
+                update. Defaults to True.
+
+        Returns:
+            bool: True if the update was successful, False otherwise.
+        """
         logger.debug(f"FMS: Update metadata attempt for FP '{fingerprint}' in index '{index_name}'.")
         # FMS might pre-process updates or log to GTM that an update is occurring on VSS-managed metadata
         # updates["_fms_last_meta_update_utc"] = datetime.now(timezone.utc).isoformat()
         return self.vss.update_metadata(index_name=index_name, fingerprint=fingerprint, metadata_updates=updates, save_after=save_after)
 
     def remove_vector(self, index_name: str, fingerprint: str, save_after: bool = True) -> bool:
+        """
+        Removes a vector from an index.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The fingerprint of the vector to remove.
+            save_after (bool, optional): Whether to save the index after removal.
+                Defaults to True.
+
+        Returns:
+            bool: True if the vector was removed successfully, False otherwise.
+        """
         logger.debug(f"FMS: Remove vector attempt for FP '{fingerprint}' in index '{index_name}'.")
         success = self.vss.remove_vector(index_name=index_name, fingerprint=fingerprint, save_after=save_after)
         # if self.global_tracker and success:
@@ -364,12 +465,39 @@ class FAISSManagementService:
         return success
 
     def count_vectors_in_index(self, index_name: str) -> int:
+        """
+        Counts the number of vectors in an index.
+
+        Args:
+            index_name (str): The name of the index.
+
+        Returns:
+            int: The number of vectors in the index.
+        """
         return self.vss.count_vectors(index_name=index_name)
 
     def list_all_fingerprints_in_index(self, index_name: str) -> List[str]:
+        """
+        Lists all vector fingerprints in an index.
+
+        Args:
+            index_name (str): The name of the index.
+
+        Returns:
+            List[str]: A list of all fingerprints in the index.
+        """
         return self.vss.list_fingerprints(index_name=index_name)
         
     def save_specific_index(self, index_name: str) -> bool:
+        """
+        Explicitly saves a specific index to disk.
+
+        Args:
+            index_name (str): The name of the index to save.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         logger.info(f"FMS: Explicit save request for index '{index_name}'. Delegating to VSS.")
         try:
             # Assuming VSS might have a public method or this delegates to VSS's _save_index_components
@@ -381,13 +509,31 @@ class FAISSManagementService:
             return False
 
     def save_all_indexes(self):
+        """Saves all managed indexes to disk."""
         logger.info("FMS: Request to save all indexes. Delegating to VSS.")
         self.vss.save_all_managed_indexes()
 
     def get_index_statistics(self, index_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Gets statistics for a specific index.
+
+        Args:
+            index_name (str): The name of the index.
+
+        Returns:
+            Optional[Dict[str, Any]]: A dictionary of statistics, or None if the
+                index does not exist.
+        """
         return self.vss.get_index_stats(index_name=index_name)
 
     def run_health_check(self) -> Dict[str, Any]:
+        """
+        Runs a health check on the service and its dependencies.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the health status of the
+                service and its components.
+        """
         logger.info("FMS performing health check, will include VSS and GMT health.")
         vss_health = self.vss.health_check()
         fms_imports_ok = CITADEL_IMPORTS_OK and NUMPY_AVAILABLE and VSS_FAISS_AVAILABLE
@@ -412,6 +558,7 @@ class FAISSManagementService:
         }
         return fms_status
     def close(self):
+        """A placeholder for a graceful shutdown method."""
         logger.info("FAISSManagementService close() called. Underlying VSS lifecycle typically managed by Hub.")
         pass # VSS instance is managed externally (e.g., by Hub)
 

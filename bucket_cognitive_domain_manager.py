@@ -185,42 +185,129 @@ from citadel_dossier_system.citadel_hub import CitadelHub
 
 # --- Pydantic Schemas & Ranking Math ---
 class MemoryType(str, Enum):
+    """Enumeration for the types of memories that can be stored."""
     SYSTEM = "system"; REFLECTION = "reflection"; PLAN = "plan"; DIALOGUE = "dialogue"; STRATEGY = "strategy"; ERROR = "error"; TASK = "task"
 class MemoryObject(BaseModel):
+    """
+    A Pydantic model representing a single memory object.
+
+    Attributes:
+        id (str): A unique identifier for the memory object.
+        agent_id (str): The ID of the agent that created this memory.
+        input_text (str): The input text that led to this memory.
+        output_text (str): The output or result of the memory.
+        memory_type (MemoryType): The type of the memory.
+        trust_score (float): A score representing the confidence in this memory.
+        created_at (datetime): The timestamp when the memory was created.
+        fingerprint (str): A unique hash computed from the memory's content.
+    """
     id: str = Field(default_factory=lambda: str(uuid.uuid4())); agent_id: str; input_text: str; output_text: str; memory_type: MemoryType; trust_score: float = Field(default=0.75, ge=0.0, le=1.0); created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc)); fingerprint: str = ""
     def compute_fingerprint(self) -> str:
+        """
+        Computes and returns a SHA256 fingerprint of the memory's content.
+
+        The fingerprint is based on the stripped input and output text, ensuring
+        that semantically identical memories have the same fingerprint.
+
+        Returns:
+            str: The computed SHA256 fingerprint.
+        """
         if not self.fingerprint: self.fingerprint = hashlib.sha256(f"{self.input_text.strip()}||{self.output_text.strip()}".encode('utf-8')).hexdigest()
         return self.fingerprint
-def composite_score(sim: float, decay: float, trust: float) -> float: return round(0.5 * sim + 0.3 * decay + 0.2 * trust, 4)
+def composite_score(sim: float, decay: float, trust: float) -> float:
+    """
+    Calculates a composite score for a memory based on similarity, time decay, and trust.
+
+    Args:
+        sim (float): The similarity score (e.g., from a vector search).
+        decay (float): The time decay factor.
+        trust (float): The trust score of the memory.
+
+    Returns:
+        float: The calculated composite score.
+    """
+    return round(0.5 * sim + 0.3 * decay + 0.2 * trust, 4)
 def time_decay(created_at: datetime, now: Optional[datetime] = None, rate: float = 0.00005) -> float:
+    """
+    Calculates a decay factor based on the age of a memory.
+
+    Args:
+        created_at (datetime): The timestamp when the memory was created.
+        now (Optional[datetime]): The current time. If None, `datetime.now(timezone.utc)` is used.
+        rate (float): The decay rate.
+
+    Returns:
+        float: The calculated decay factor, between 0.0 and 1.0.
+    """
     now = now or datetime.now(timezone.utc); return float(np.exp(-rate * (now - created_at).total_seconds()))
 
 class BucketCognitiveDomainManager:
+    """
+    Manages a self-contained "Cognitive Domain" for AI agents.
+
+    This class orchestrates a hybrid persistence model using Google Cloud Storage (GCS)
+    as the single source of truth, with local caching of a FAISS index for vector
+    search and an SQLite database for structured metadata. It provides a resilient
+    and scalable memory layer for agents.
+
+    Attributes:
+        domain_name (str): The name of the cognitive domain.
+        hub (Any): An instance of CitadelHub for accessing shared services.
+        logger (logging.Logger): A logger instance for this manager.
+        bucket_name (str): The name of the GCS bucket for this domain.
+        local_cache_path (Path): The path to the local cache directory.
+        db_path (Path): The path to the SQLite database file.
+        faiss_path (Path): The path to the FAISS index file.
+        is_ready (bool): True if the manager is initialized and ready.
+    """
     # --- Class Definition and Methods ---
     def __init__(self, domain_name: str, hub: Any, bucket_prefix: str = "citadel-cognitive-domain", use_agent_indexes: bool = False):
+        """
+        Initializes the BucketCognitiveDomainManager.
+
+        Args:
+            domain_name (str): A unique name for the cognitive domain.
+            hub (Any): An instance of the CitadelHub to access shared services like
+                the EmbeddingService.
+            bucket_prefix (str, optional): The prefix for the GCS bucket name.
+                Defaults to "citadel-cognitive-domain".
+            use_agent_indexes (bool, optional): If True, maintains separate in-memory
+                FAISS indexes for each agent. Defaults to False.
+        """
         self.domain_name = domain_name; self.hub = hub; self.logger = logging.getLogger(f"BCDM.{self.domain_name}"); self.bucket_name = f"{bucket_prefix}-{self.domain_name.lower().replace('_', '-')}"; self.local_cache_path = Path.home() / ".citadel" / "cognitive_domains" / self.domain_name; self.db_path = self.local_cache_path / "memory_metadata.db"; self.faiss_path = self.local_cache_path / "vector_index.faiss"; self.trace_log_path = self.local_cache_path / "domain_trace.jsonl"; self.storage_client: Optional[storage.Client] = None; self.embedding_service: Optional[Any] = self.hub.get_service("EmbeddingService"); self.faiss_index: Optional[faiss.IndexIDMap] = None; self.db_conn: Optional[sqlite3.Connection] = None; self.is_ready = False; self.init_error: Optional[str] = None
         self.use_agent_indexes = use_agent_indexes; self.agent_faiss_indexes: Dict[str, faiss.IndexIDMap] = {}
         try: self.local_cache_path.mkdir(parents=True, exist_ok=True); self._initialize_domain(); self.is_ready = True
         except Exception as e: self.init_error = f"Initialization failed: {e}"; self.logger.error(self.init_error, exc_info=True)
     def _log_event(self, event_type: str, status: str, payload: dict):
+        """Logs a structured event to the local trace log."""
         log_entry = {"timestamp": datetime.now(timezone.utc).isoformat(),"domain": self.domain_name,"event_type": event_type,"status": status,"payload": payload,};
         with open(self.trace_log_path, "a", encoding="utf-8") as f: f.write(json.dumps(log_entry) + "\n")
-    def _initialize_domain(self): self.storage_client = storage.Client(); self._ensure_bucket_and_structure(); self._sync_and_load_db(); self._sync_and_load_faiss()
+    def _initialize_domain(self):
+        """Initializes the domain by setting up GCS, DB, and FAISS."""
+        self.storage_client = storage.Client(); self._ensure_bucket_and_structure(); self._sync_and_load_db(); self._sync_and_load_faiss()
     def _get_bucket(self) -> storage.Bucket:
+        """Gets or creates the GCS bucket for this domain."""
         if not self.storage_client: raise ConnectionError("GCS client not initialized.");
         try: return self.storage_client.get_bucket(self.bucket_name)
         except NotFound: self.logger.info(f"Creating GCS bucket: {self.bucket_name}"); return self.storage_client.create_bucket(self.bucket_name, location="US")
     def _ensure_bucket_and_structure(self):
+        """Ensures the basic GCS folder structure exists."""
         bucket = self._get_bucket()
         for prefix in ["db/", "faiss/", "events/", "sessions/"]:
             blob = bucket.blob(f"{prefix}.keep");
             if not blob.exists(): blob.upload_from_string("", content_type="text/plain")
     def _sync_and_load_db(self):
+        """
+        Downloads the latest DB from GCS if needed and sets up the connection.
+        """
         bucket = self._get_bucket(); db_blob = bucket.get_blob("db/memory_metadata.db");
         if db_blob and (not self.db_path.exists() or os.path.getmtime(self.db_path) < db_blob.updated.timestamp()): db_blob.download_to_filename(self.db_path)
         self.db_conn = sqlite3.connect(self.db_path, check_same_thread=False); self.db_conn.row_factory = sqlite3.Row;
         with self.db_conn: self.db_conn.execute("CREATE TABLE IF NOT EXISTS memory_log (id TEXT PRIMARY KEY, agent_id TEXT, memory_type TEXT, trust_score REAL, fingerprint TEXT UNIQUE, created_at TEXT, faiss_id INTEGER UNIQUE, content_json TEXT)")
     def _sync_and_load_faiss(self):
+        """
+        Downloads the latest FAISS index from GCS if needed and loads it.
+        """
         bucket = self._get_bucket(); faiss_blob = bucket.get_blob("faiss/vector_index.faiss");
         if faiss_blob and (not self.faiss_path.exists() or os.path.getmtime(self.faiss_path) < faiss_blob.updated.timestamp()):
             if self.faiss_path.exists(): shutil.move(self.faiss_path, self.faiss_path.with_suffix('.faiss.bak'))
@@ -233,10 +320,16 @@ class BucketCognitiveDomainManager:
             except Exception as e: self.logger.error(f"Failed to load FAISS index: {e}. Creating new.", exc_info=True); self.faiss_index = None
         if not self.faiss_index: dim = getattr(self.embedding_service, 'embedding_dim', 1536); self.faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(dim))
     def _get_agent_faiss_index(self, agent_id: str) -> faiss.IndexIDMap:
+        """
+        Retrieves or creates an in-memory FAISS index for a specific agent.
+        """
         if agent_id not in self.agent_faiss_indexes:
             self.logger.info(f"Creating new in-memory FAISS index for agent: {agent_id}"); dim = getattr(self.embedding_service, 'embedding_dim', 1536); self.agent_faiss_indexes[agent_id] = faiss.IndexIDMap(faiss.IndexFlatL2(dim))
         return self.agent_faiss_indexes[agent_id]
     def _get_embedding(self, text: str) -> List[float]:
+        """
+        Gets an embedding for the given text using the configured EmbeddingService.
+        """
         if hasattr(self.embedding_service, 'generate_embedding_sync'):
             try: result = self.embedding_service.generate_embedding_sync(text, return_metadata=False)
             except TypeError: result = self.embedding_service.generate_embedding_sync(text)
@@ -247,6 +340,19 @@ class BucketCognitiveDomainManager:
         elif hasattr(self.embedding_service, 'embed_text'): return self.embedding_service.embed_text(text)
         else: raise AttributeError("EmbeddingService has no known embedding method.")
     def ingest_thought(self, mem_obj: MemoryObject) -> Dict[str, Any]:
+        """
+        Ingests a new memory object into the cognitive domain.
+
+        This involves generating an embedding, and saving the memory to the
+        SQLite DB, the FAISS index, and the GCS event log.
+
+        Args:
+            mem_obj (MemoryObject): The memory object to ingest.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the status of the operation
+                and metadata about the ingested memory.
+        """
         if not self.is_ready or any(s is None for s in [self.db_conn, self.faiss_index, self.embedding_service]): return {"status": "error", "message": "Manager or required service not ready."}
         mem_obj.compute_fingerprint(); embedding = self._get_embedding(f"Input: {mem_obj.input_text}\nOutput: {mem_obj.output_text}");
         if not embedding: raise ValueError("Embedding generation failed.")
@@ -261,6 +367,26 @@ class BucketCognitiveDomainManager:
             except sqlite3.IntegrityError: self._log_event("INGEST", "FAIL", {"fingerprint": mem_obj.fingerprint, "reason": "Duplicate fingerprint"}); return {"status": "skipped", "message": "Duplicate fingerprint"}
         return {"status": "success", "id": mem_obj.id, "faiss_id": new_faiss_id, "gcs_path": gcs_path}
     def recall_context(self, query_text: str, k: int = 5, filter_by_agent_id: Optional[str] = None, filter_by_memory_type: Optional[MemoryType] = None, min_score_threshold: float = 0.15) -> List[Dict[str, Any]]:
+        """
+        Recalls relevant memories from the domain based on a query.
+
+        It performs a vector search and then filters and scores the results
+        based on agent ID, memory type, and a composite score.
+
+        Args:
+            query_text (str): The text to query for relevant memories.
+            k (int, optional): The maximum number of memories to return. Defaults to 5.
+            filter_by_agent_id (Optional[str], optional): An agent ID to filter
+                memories by. Defaults to None.
+            filter_by_memory_type (Optional[MemoryType], optional): A memory type
+                to filter memories by. Defaults to None.
+            min_score_threshold (float, optional): The minimum composite score for a
+                memory to be included in the results. Defaults to 0.15.
+
+        Returns:
+            List[Dict[str, Any]]: A list of dictionaries, where each dictionary
+                contains the 'score' and the 'memory' object.
+        """
         # // CGRF-FR-BCDM-300-RECALL-001 // This method now enforces a minimum score threshold to prevent
         # // the return of semantically irrelevant memories, a critical feature for production AI.
         if not self.is_ready or not self.faiss_index or self.faiss_index.ntotal == 0: return []
@@ -286,6 +412,17 @@ class BucketCognitiveDomainManager:
         assert all(final_results[i]['score'] >= final_results[i+1]['score'] for i in range(len(final_results)-1)), "Recall results are not sorted by score."
         return final_results[:k]
     def reinforce_thought(self, fingerprint: str, boost: float = 0.1):
+        """
+        Increases the trust score of a memory.
+
+        Args:
+            fingerprint (str): The fingerprint of the memory to reinforce.
+            boost (float, optional): The amount to increase the trust score by.
+                Defaults to 0.1.
+
+        Returns:
+            A dictionary with the status of the operation.
+        """
         if not self.db_conn or not self.is_ready: return {"status": "error", "message": "Manager not ready"}
         with self.db_conn:
             cursor = self.db_conn.execute("SELECT trust_score FROM memory_log WHERE fingerprint = ?", (fingerprint,)); row = cursor.fetchone()
@@ -297,11 +434,28 @@ class BucketCognitiveDomainManager:
                 return {"status": "success", "new_score": new_score}
         self._log_event("REINFORCE", "FAIL", {"fingerprint": fingerprint, "reason": "Not found"}); return {"status": "error", "message": "Fingerprint not found"}
     def get_trace_events(self, event_type: Optional[str] = None) -> List[dict]:
+        """
+        Retrieves trace events from the local log file.
+
+        Args:
+            event_type (Optional[str], optional): If provided, filters events
+                by this type. Defaults to None.
+
+        Returns:
+            List[dict]: A list of trace event dictionaries.
+        """
         if not self.trace_log_path.exists(): return []
         with open(self.trace_log_path, "r", encoding="utf-8") as f: entries = [json.loads(line) for line in f if line.strip()]
         if event_type: return [e for e in entries if e.get("event_type") == event_type]
         return entries
     def shutdown(self, sync_to_gcs: bool = True):
+        """
+        Shuts down the manager, closing connections and syncing data to GCS.
+
+        Args:
+            sync_to_gcs (bool, optional): If True, uploads the local DB and
+                FAISS index to GCS. Defaults to True.
+        """
         if self.db_conn: self.db_conn.close(); self.db_conn = None
         if sync_to_gcs:
             if not self.storage_client: self.logger.error("GCS client not init."); return

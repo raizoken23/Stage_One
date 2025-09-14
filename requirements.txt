@@ -1,0 +1,12 @@
+numpy
+faiss-cpu
+google-cloud-storage
+pydantic
+openai
+tenacity
+cachetools
+httpx
+rich
+psutil
+sentence-transformers
+pywavelets

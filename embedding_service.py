@@ -128,7 +128,14 @@ if not logger.hasHandlers():
 logger.setLevel(os.getenv("EMBEDDING_SERVICE_LOG_LEVEL", "INFO").upper())
 # --- Unified Warning Helper ---
 def log_warning(message: str, component: str = "EmbeddingService"):
-    """Log a warning to both standard logger and Guardian structured logs if available."""
+    """
+    Log a warning to both standard logger and Guardian structured logs if available.
+
+    Args:
+        message (str): The warning message to log.
+        component (str, optional): The component from which the warning originates.
+            Defaults to "EmbeddingService".
+    """
     logger.warning(message)
     if log_event:
         try:
@@ -162,6 +169,13 @@ __last_updated__ = datetime.now(timezone.utc).isoformat()
 _execution_role = "core_embedding_generation_service"
 MAX_CONCURRENT_REQUESTS = 5  # Adjusted
 class _ApiKeyManagerForEmbedding:
+    """
+    Manages OpenAI API keys, including loading, validation, and rotation.
+
+    This class provides a robust way to handle API keys from multiple sources
+    (explicit list, environment variables, key vault file) and ensures they are
+    valid before use.
+    """
     def __init__(
         self,
         key_list_override: Optional[List[str]] = None,
@@ -170,6 +184,19 @@ class _ApiKeyManagerForEmbedding:
         key_vault_path_override: Optional[str] = None,   # NEW
         skip_online_validation: bool = False             # NEW
     ):
+        """
+        Initializes the API key manager.
+
+        Args:
+            key_list_override (Optional[List[str]], optional): A list of API keys
+                to use directly. Defaults to None.
+            project_id_override (Optional[str]], optional): An OpenAI project ID
+                to associate with the keys. Defaults to None.
+            key_vault_path_override (Optional[str]], optional): A path to a key
+                vault file. Defaults to None.
+            skip_online_validation (bool, optional): If True, skips online API
+                key validation. Defaults to False.
+        """
         self.project_id_for_validation = project_id_override
         self._skip_online_validation = bool(skip_online_validation)  # NEW
         self.key_source_description = "key_list_override"
@@ -248,6 +275,7 @@ class _ApiKeyManagerForEmbedding:
         self._last_load_attempt_success = bool(self._validated_key_pairs)
 
     def _is_validation_due(self, key: str) -> bool:
+        """Checks if a key is due for re-validation."""
         # NEW: allow skipping validation entirely
         if self._skip_online_validation:
             return False
@@ -257,6 +285,7 @@ class _ApiKeyManagerForEmbedding:
         return (time.time() - last_validated) > self._validation_interval_seconds
 
     def _validate_key_via_api(self, key: str) -> bool:
+        """Validates a key by making a small call to the OpenAI API."""
         # NEW: skip live API validation if requested
         if self._skip_online_validation:
             return True
@@ -288,6 +317,7 @@ class _ApiKeyManagerForEmbedding:
             return False
 
     def _reload_and_validate_keys(self):
+        """Reloads and validates all available keys."""
         validated_pairs_temp: List[Tuple[str, Optional[str]]] = []
         if not self._raw_keys_to_load:
             self._validated_key_pairs = []
@@ -311,6 +341,17 @@ class _ApiKeyManagerForEmbedding:
         self._last_load_attempt_success = bool(self._validated_key_pairs)
 
     def get_key(self, service_tag: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Gets the next available API key in a round-robin fashion.
+
+        Args:
+            service_tag (Optional[str], optional): A tag for logging purposes.
+                Defaults to None.
+
+        Returns:
+            Optional[Dict[str, Any]]: A dictionary containing the key and
+                associated metadata, or None if no keys are available.
+        """
         if not self._key_cycler:
             logger.warning(f"[{type(self).__name__}] No keys currently loaded. Attempting reload.")
             self._reload_and_validate_keys()
@@ -339,9 +380,16 @@ class _ApiKeyManagerForEmbedding:
             return None
 
     def get_all_loaded_key_values(self) -> List[str]:
+        """Returns a list of all currently loaded and validated API keys."""
         return [pair[0] for pair in self._validated_key_pairs]
 
 class EmbeddingService:
+    """
+    A robust service for generating text embeddings using the OpenAI API.
+
+    This service handles API key management, request retries, batching, caching,
+    and structured logging. It can be used synchronously or asynchronously.
+    """
     __version__ = "2.3.3"  # bump
 
     def __init__(self,
@@ -354,6 +402,28 @@ class EmbeddingService:
                  # keep your new params; they won't affect keys unless used
                  key_vault_path_override: Optional[str] = None,
                  skip_online_validation: bool = False):
+        """
+        Initializes the EmbeddingService.
+
+        Args:
+            key_manager_instance_override (Optional[Any], optional): An instance of
+                an API key manager. If not provided, a default one will be created.
+                Defaults to None.
+            faiss_manager_instance_override (Optional[Any], optional): An instance of
+                a FAISS manager for vector storage. Defaults to None.
+            embedding_model_override (Optional[str], optional): The OpenAI embedding
+                model to use. Defaults to None.
+            lru_cache_size_override (Optional[int], optional): The size of the LRU
+                cache for embeddings. Defaults to None.
+            log_embedding_calls_override (Optional[bool], optional): Whether to log
+                embedding calls. Defaults to None.
+            embedding_log_path_override (Optional[Union[str, Any]], optional):
+                The path to the embedding log file. Defaults to None.
+            key_vault_path_override (Optional[str], optional): A path to a key
+                vault file. Defaults to None.
+            skip_online_validation (bool, optional): If True, skips online API
+                key validation. Defaults to False.
+        """
         instance_uuid_short = uuid.uuid4().hex[:6]
         self.logger = logging.getLogger(f"CitadelEmbeddingService.instance.{instance_uuid_short}")
         self.logger.setLevel(logging.DEBUG)
@@ -466,6 +536,12 @@ class EmbeddingService:
 
 
     def is_ready(self) -> bool:
+        """
+        Checks if the service is fully initialized and ready to make API calls.
+
+        Returns:
+            bool: True if the service is ready, False otherwise.
+        """
         if not self._initialized_successfully: return False
         if not OPENAI_SDK_AVAILABLE: self.logger.warning("ES.is_ready: OpenAI SDK marked unavailable."); return False
         if not self.key_manager: self.logger.warning("ES.is_ready: KeyManager instance is None."); return False
@@ -480,6 +556,7 @@ class EmbeddingService:
         if not (self.sync_client and self.async_client): self.logger.error("ES.is_ready: OpenAI client(s) not initialized."); return False
         return True
     def _get_next_api_key(self) -> Optional[str]:
+        """Rotates to the next available API key."""
         if not self.key_manager or not hasattr(self.key_manager, 'get_key'):
             self.logger.error("❌ No KeyManager available to rotate keys for EmbeddingService.")
             return None
@@ -492,6 +569,7 @@ class EmbeddingService:
         if self.async_client: self.async_client.api_key = new_key
         return new_key
     def _write_embedding_log(self, text_preview: str, api_key_used: Optional[str], source_method: str, success: bool, tokens_processed: Optional[int]=None, error_msg: Optional[str]=None, batch_size: Optional[int]=None):
+        """Writes a structured log entry for an embedding call."""
         if not self.log_embedding_calls or not self.embedding_log_file: return
         try:
             log_entry: Dict[str, Any] = {
@@ -513,6 +591,7 @@ class EmbeddingService:
         before_sleep=before_sleep_log(logger, logging.WARNING) if TENACITY_AVAILABLE else None,
     )
     async def _generate_embeddings_batch_attempt_async(self, texts: List[str], current_api_key_for_log: Optional[str]) -> List[List[float]]:
+        """A single attempt to generate embeddings for a batch asynchronously."""
         source_method_log = "async_batch_attempt"
         text_preview_log = texts[0][:50] if texts else "N/A_empty_batch"
         tokens_for_log = sum(len(t.split()) for t in texts)
@@ -556,6 +635,7 @@ class EmbeddingService:
             self._write_embedding_log(text_preview_log, current_api_key_for_log, source_method_log, False, tokens_processed=tokens_for_log, batch_size=len(texts), error_msg=f"Unexpected: {e_unexp}")
             raise
     async def _process_one_batch_async(self, batch_texts: List[str]) -> List[Optional[List[float]]]:
+        """Processes a single batch of texts, with fallback to individual retries."""
         async with self._semaphore:
             current_api_key_for_this_attempt = str(self.async_client.api_key) if self.async_client and self.async_client.api_key else "N/A"
             try:
@@ -579,6 +659,16 @@ class EmbeddingService:
                     return individual_results
                 return [None] * len(batch_texts)
     async def generate_embeddings_batch_async(self, texts: List[str], use_cache: bool = True) -> List[List[float]]:
+        """
+        Generates embeddings for a batch of texts asynchronously.
+
+        Args:
+            texts (List[str]): A list of texts to embed.
+            use_cache (bool, optional): Whether to use the cache. Defaults to True.
+
+        Returns:
+            List[List[float]]: A list of embedding vectors.
+        """
         if not self.is_ready(): return [self._default_vector()] * len(texts)
         if not texts: return []
         unique_texts_map: Dict[str, List[int]] = defaultdict(list)
@@ -620,6 +710,16 @@ class EmbeddingService:
                 final_batch_results[original_idx] = final_embedding_for_text if final_embedding_for_text else self._default_vector()
         return final_batch_results
     async def generate_embedding_async_with_metadata(self, text: str, use_cache: bool = True) -> Dict[str, Any]:
+        """
+        Generates an embedding for a single text asynchronously, with metadata.
+
+        Args:
+            text (str): The text to embed.
+            use_cache (bool, optional): Whether to use the cache. Defaults to True.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the embedding vector and metadata.
+        """
         if not self.is_ready(): return {"vector": self._default_vector(), "error": "Service not ready", "model_used": self.model, "cache_hit": False}
         if not isinstance(text, str) or not text.strip():
             return {"vector": self._default_vector(), "error": "Invalid input", "model_used": self.model, "cache_hit": False}
@@ -643,6 +743,16 @@ class EmbeddingService:
             self._cache[text] = embedding
         return result_payload
     async def generate_embedding_async(self, text: str, use_cache: bool = True) -> Optional[List[float]]:
+        """
+        Generates an embedding for a single text asynchronously.
+
+        Args:
+            text (str): The text to embed.
+            use_cache (bool, optional): Whether to use the cache. Defaults to True.
+
+        Returns:
+            Optional[List[float]]: The embedding vector, or None on failure.
+        """
         if not self.is_ready(): return self._default_vector()
         result_meta = await self.generate_embedding_async_with_metadata(text, use_cache)
         return result_meta.get("vector") if "error" not in result_meta else self._default_vector()
@@ -653,6 +763,19 @@ class EmbeddingService:
         before_sleep=before_sleep_log(logger, logging.WARNING) if TENACITY_AVAILABLE else None,
     )
     def generate_embedding_sync(self, text: str, use_cache: bool = True, return_metadata: bool = False) -> Union[List[float], Dict[str, Any]]:
+        """
+        Generates an embedding for a single text synchronously.
+
+        Args:
+            text (str): The text to embed.
+            use_cache (bool, optional): Whether to use the cache. Defaults to True.
+            return_metadata (bool, optional): Whether to return metadata along
+                with the embedding. Defaults to False.
+
+        Returns:
+            Union[List[float], Dict[str, Any]]: The embedding vector, or a
+                dictionary with the vector and metadata if `return_metadata` is True.
+        """
         if not self.is_ready():
             err_payload_not_ready = {"error": "Service not ready", "model_used": self.model, "cache_hit": False, "vector": self._default_vector()}
             return self._default_vector() if not return_metadata else err_payload_not_ready
@@ -700,9 +823,20 @@ class EmbeddingService:
         final_err_payload = {"error": "Embedding generation failed after all attempts (sync)", "model_used": self.model, "cache_hit": False, "source_key_masked": f"sk-...{api_key_for_this_attempt[-4:]}" if api_key_for_this_attempt and len(api_key_for_this_attempt)>=4 else "N/A", "vector": self._default_vector()}
         return self._default_vector() if not return_metadata else final_err_payload
     def _default_vector(self) -> List[float]:
+        """Returns a zero vector of the correct dimension."""
         return [0.0] * self.embedding_dimension
     @staticmethod
     def generate_fingerprint(text: str, method: str = "sha256") -> str:
+        """
+        Generates a fingerprint for a text using the specified hash method.
+
+        Args:
+            text (str): The text to fingerprint.
+            method (str, optional): The hashing method to use. Defaults to "sha256".
+
+        Returns:
+            str: The generated fingerprint.
+        """
         text_bytes = str(text).encode("utf-8", "ignore")
         if method == "sha256": return hashlib.sha256(text_bytes).hexdigest()
         elif method == "md5": return hashlib.md5(text_bytes).hexdigest()
@@ -711,6 +845,18 @@ class EmbeddingService:
             logger.warning(f"Unsupported fingerprint method: '{method}'. Defaulting to sha256.")
             return hashlib.sha256(text_bytes).hexdigest()
     def store_vector_to_faiss(self, thought_document: Dict[str, Any], *, route_name: str = "learning_default") -> bool:
+        """
+        Stores a vector in a FAISS index via the FAISSManagementService.
+
+        Args:
+            thought_document (Dict[str, Any]): A dictionary containing the
+                embedding vector and associated metadata.
+            route_name (str, optional): The name of the FAISS index to store
+                the vector in. Defaults to "learning_default".
+
+        Returns:
+            bool: True if the vector was stored successfully, False otherwise.
+        """
         if not self.faiss_manager:
             self.logger.warning(f"FAISSManagementService not available. Cannot store vector for '{thought_document.get('fingerprint','N/A')}' to FAISS route '{route_name}'.")
             return False
@@ -753,8 +899,15 @@ class EmbeddingService:
             self.logger.error(f"FAISS Store Error (via EmbeddingService) for {fingerprint} (route: {route_name}): {e_store_faiss}", exc_info=True)
         return False
     def _current_utc_iso_for_meta(self) -> str:
+        """Returns the current UTC time as an ISO 8601 string."""
         return datetime.now(timezone.utc).isoformat()
     async def confirm_openai_embedding_ready(self) -> bool:
+        """
+        Performs a health check to confirm the service can connect to the OpenAI API.
+
+        Returns:
+            bool: True if the health check is successful, False otherwise.
+        """
         if not self.is_ready():
             self.logger.error("confirm_openai_embedding_ready: Service is not ready. Aborting health check.")
             return False
@@ -784,6 +937,18 @@ def get_default_embedding_service(
     log_embedding_calls_override: Optional[bool] = None,
     embedding_log_path_override: Optional[Union[str, Path]] = None
 ) -> Optional[EmbeddingService]:
+    """
+    A factory function to get a singleton instance of the EmbeddingService.
+
+    Args:
+        force_new (bool, optional): If True, forces the creation of a new
+            instance. Defaults to False.
+        **kwargs: Keyword arguments to pass to the EmbeddingService constructor.
+
+    Returns:
+        Optional[EmbeddingService]: The singleton instance of the EmbeddingService,
+            or None if initialization fails.
+    """
     global _default_embedding_service_instance
     if not force_new and _default_embedding_service_instance and _default_embedding_service_instance.is_ready():
         return _default_embedding_service_instance
@@ -813,6 +978,21 @@ def get_default_embedding_service(
             _default_embedding_service_instance = None
         return _default_embedding_service_instance
 async def generate_embedding_async(text: str, use_cache: bool = True, return_metadata: bool = False, **svc_kwargs) -> Union[Optional[List[float]], Dict[str, Any]]:
+    """
+    A convenience function to generate an embedding asynchronously.
+
+    This function gets the default EmbeddingService instance and calls its
+    `generate_embedding_async_with_metadata` or `generate_embedding_async` method.
+
+    Args:
+        text (str): The text to embed.
+        use_cache (bool, optional): Whether to use the cache. Defaults to True.
+        return_metadata (bool, optional): Whether to return metadata. Defaults to False.
+        **svc_kwargs: Keyword arguments for the EmbeddingService factory.
+
+    Returns:
+        The embedding vector, or a dictionary with metadata.
+    """
     service = get_default_embedding_service(**svc_kwargs)
     if not service or not service.is_ready():
         default_vec = [0.0] * (SUPPORTED_EMBEDDING_MODELS_MAP.get(svc_kwargs.get("embedding_model_override", DEFAULT_EMBEDDING_MODEL), DEFAULT_EMBEDDING_DIMENSION))
@@ -820,29 +1000,92 @@ async def generate_embedding_async(text: str, use_cache: bool = True, return_met
     if return_metadata: return await service.generate_embedding_async_with_metadata(text, use_cache)
     return await service.generate_embedding_async(text, use_cache)
 async def generate_embeddings_batch_async(texts: List[str], use_cache: bool = True, **svc_kwargs) -> List[List[float]]:
+    """
+    A convenience function to generate embeddings for a batch of texts asynchronously.
+
+    Args:
+        texts (List[str]): The texts to embed.
+        use_cache (bool, optional): Whether to use the cache. Defaults to True.
+        **svc_kwargs: Keyword arguments for the EmbeddingService factory.
+
+    Returns:
+        A list of embedding vectors.
+    """
     service = get_default_embedding_service(**svc_kwargs)
     if not service or not service.is_ready():
         default_dim = SUPPORTED_EMBEDDING_MODELS_MAP.get(svc_kwargs.get("embedding_model_override", DEFAULT_EMBEDDING_MODEL), DEFAULT_EMBEDDING_DIMENSION)
         return [[0.0] * default_dim for _ in texts]
     return await service.generate_embeddings_batch_async(texts, use_cache)
 def generate_embedding_sync(text: str, use_cache: bool = True, return_metadata: bool = False, **svc_kwargs) -> Union[List[float], Dict[str, Any]]:
+    """
+    A convenience function to generate an embedding synchronously.
+
+    Args:
+        text (str): The text to embed.
+        use_cache (bool, optional): Whether to use the cache. Defaults to True.
+        return_metadata (bool, optional): Whether to return metadata. Defaults to False.
+        **svc_kwargs: Keyword arguments for the EmbeddingService factory.
+
+    Returns:
+        The embedding vector, or a dictionary with metadata.
+    """
     service = get_default_embedding_service(**svc_kwargs)
     if not service or not service.is_ready():
         default_vec = [0.0] * (SUPPORTED_EMBEDDING_MODELS_MAP.get(svc_kwargs.get("embedding_model_override", DEFAULT_EMBEDDING_MODEL), DEFAULT_EMBEDDING_DIMENSION))
         return default_vec if not return_metadata else {"error":"EmbeddingService not ready/available", "vector": default_vec, "model_used":svc_kwargs.get("embedding_model_override", DEFAULT_EMBEDDING_MODEL), "cache_hit":False}
     return service.generate_embedding_sync(text, use_cache, return_metadata)
 def embed_text(text: str, **svc_kwargs) -> List[float]:
+    """
+    A simple convenience function to get an embedding vector synchronously.
+
+    Args:
+        text (str): The text to embed.
+        **svc_kwargs: Keyword arguments for the EmbeddingService factory.
+
+    Returns:
+        The embedding vector.
+    """
     service = get_default_embedding_service(**svc_kwargs)
     if not service or not service.is_ready(): return [0.0] * (SUPPORTED_EMBEDDING_MODELS_MAP.get(svc_kwargs.get("embedding_model_override", DEFAULT_EMBEDDING_MODEL), DEFAULT_EMBEDDING_DIMENSION))
     result = service.generate_embedding_sync(text, use_cache=True, return_metadata=False)
     return result if isinstance(result, list) else service._default_vector()
 def generate_fingerprint(text: str, method: str = "sha256") -> str:
+    """
+    A convenience function to generate a fingerprint for a text.
+
+    Args:
+        text (str): The text to fingerprint.
+        method (str, optional): The hashing method. Defaults to "sha256".
+
+    Returns:
+        The fingerprint.
+    """
     return EmbeddingService.generate_fingerprint(text, method)
 def store_vector_to_faiss(thought_document: dict, *, route_name: str = "learning_default", **svc_kwargs) -> bool:
+    """
+    A convenience function to store a vector in a FAISS index.
+
+    Args:
+        thought_document (dict): The document containing the vector and metadata.
+        route_name (str, optional): The FAISS index name. Defaults to "learning_default".
+        **svc_kwargs: Keyword arguments for the EmbeddingService factory.
+
+    Returns:
+        True if successful, False otherwise.
+    """
     service = get_default_embedding_service(**svc_kwargs)
     if not service or not service.is_ready(): return False
     return service.store_vector_to_faiss(thought_document, route_name=route_name)
 async def confirm_openai_embedding_ready(**svc_kwargs) -> bool:
+    """
+    A convenience function to perform a health check on the embedding service.
+
+    Args:
+        **svc_kwargs: Keyword arguments for the EmbeddingService factory.
+
+    Returns:
+        True if the service is ready, False otherwise.
+    """
     service = get_default_embedding_service(**svc_kwargs)
     if not service: return False
     return await service.confirm_openai_embedding_ready()

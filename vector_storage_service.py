@@ -96,7 +96,6 @@ class VectorStorageService:
     """
     Manages FAISS-based vector storage, providing operations to add, search,
     and reconstruct vectors along with their metadata.
-    Integrates KME (KeyManager Enabled) for embedding.
     """
     __version__ = "1.0.3-KME"
 
@@ -107,14 +106,27 @@ class VectorStorageService:
                 embedding_function: Optional[Callable[[str], List[float]]] = None,
                 system_config: Optional[dict] = None,
                 hub_instance: Optional[Any] = None):
+        """
+        Initializes the VectorStorageService.
 
+        Args:
+            vector_indexes_base_dir (Union[str, Path], optional): The base
+                directory for storing FAISS indexes. Defaults to "faiss_storage".
+            embedding_dim (int, optional): The dimension of the embeddings.
+                Defaults to DEFAULT_EMBEDDING_DIM.
+            default_metric_type (str, optional): The default distance metric
+                to use (e.g., "L2", "IP"). Defaults to "L2".
+            embedding_function (Optional[Callable[[str], List[float]]], optional):
+                A function to generate embeddings. Defaults to None.
+            system_config (Optional[dict], optional): A dictionary of system
+                configuration. Defaults to None.
+            hub_instance (Optional[Any], optional): An instance of the CitadelHub.
+                Defaults to None.
+        """
         self._initialized_successfully = False
         self.init_error_detail: Optional[str] = None
         self._locks = defaultdict(threading.RLock)
 
-        # ---------------------------
-        # 1. Validate Dependencies
-        # ---------------------------
         if not FAISS_AVAILABLE:
             self.init_error_detail = "[F956][CAPS:VSS_ERR] FAISS library not available. VectorStorageService cannot operate."
             logger.critical(self.init_error_detail)
@@ -146,9 +158,6 @@ class VectorStorageService:
         self.system_config = system_config or {}
         self.hub_instance = hub_instance
 
-        # ---------------------------
-        # 2. Resolve Base Directory
-        # ---------------------------
         effective_base_dir = vector_indexes_base_dir
         hub_paths = getattr(getattr(self.hub_instance, "SYSTEM_CONFIG", None), "paths", None)
 
@@ -181,9 +190,6 @@ class VectorStorageService:
                 )
             return
 
-        # ---------------------------
-        # 3. Embedding / KME Setup
-        # ---------------------------
         self.embedding_dim = embedding_dim
         self.default_metric_type = default_metric_type.upper() if default_metric_type else "L2"
         if self.default_metric_type not in ["L2", "IP"]:
@@ -194,7 +200,6 @@ class VectorStorageService:
         self.key_manager = getattr(hub_instance, "key_manager", None) or self.system_config.get("key_manager")
         self.embedding_service = getattr(hub_instance, "embedding_service", None) or self.system_config.get("embedding_service")
 
-        # Dynamic fallback to embedding_service.embed_text
         if not self.embedding_function and self.embedding_service:
             try:
                 possible_func = getattr(self.embedding_service, "embed_text", None)
@@ -209,9 +214,6 @@ class VectorStorageService:
         if not self.embedding_function:
             logger.warning("[F956][CAPS:VSS_WARN] No embedding function bound. KME active but embeddings unavailable.")
 
-        # ---------------------------
-        # 4. Internal Data Structures
-        # ---------------------------
         self._loaded_faiss_indexes: Dict[str, faiss.IndexIDMap] = {}
         self._loaded_fp_to_data_maps: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._next_faiss_ids: Dict[str, int] = {}
@@ -237,6 +239,19 @@ class VectorStorageService:
 
 
     def embed_text(self, text: str) -> List[float]:
+        """
+        Generates an embedding for the given text using the configured embedding function.
+
+        Args:
+            text (str): The text to embed.
+
+        Raises:
+            RuntimeError: If no embedding function is bound.
+            ValueError: If the generated embedding has a dimension mismatch.
+
+        Returns:
+            List[float]: The generated embedding vector.
+        """
         if not self.embedding_function:
             raise RuntimeError("No embedding_function bound")
         v = self.embedding_function(text)
@@ -368,6 +383,7 @@ class VectorStorageService:
             return current_index, current_fp_data_map
 
     def _save_index_components(self, index_name: str):
+        """Saves the FAISS index and fingerprint map to disk."""
         with self._locks[index_name]:
             if index_name not in self._loaded_faiss_indexes or index_name not in self._loaded_fp_to_data_maps:
                 logger.warning(f"[F956][CAPS:VSS_WARN] Cannot save: Index '{index_name}' not loaded in memory or map is missing.")
@@ -376,7 +392,6 @@ class VectorStorageService:
             map_to_save = self._loaded_fp_to_data_maps[index_name]
             index_file_path, fp_data_map_file_path = self._get_index_paths(index_name)
             try:
-                # Save to temporary files first, then rename for atomicity
                 tmp_index_file_path = index_file_path.with_suffix(f"{index_file_path.suffix}.tmp")
                 tmp_fp_data_map_file_path = fp_data_map_file_path.with_suffix(f"{fp_data_map_file_path.suffix}.tmp")
 
@@ -393,18 +408,31 @@ class VectorStorageService:
                 logger.info(f"[F956][CAPS:VSS_INFO] Index '{index_name}' and data map saved successfully to {index_file_path} and {fp_data_map_file_path}.")
             except Exception as e:
                 logger.error(f"[F956][CAPS:VSS_ERR] Error saving index/map for '{index_name}': {e}", exc_info=True)
-                # Clean up temp files if they exist on error
                 if tmp_index_file_path.exists(): tmp_index_file_path.unlink(missing_ok=True)
                 if tmp_fp_data_map_file_path.exists(): tmp_fp_data_map_file_path.unlink(missing_ok=True)
 
     def _make_fingerprint(self, vector: List[float], metadata: Dict[str, Any]) -> str:
-        # stable, order-independent hash
+        """Creates a deterministic fingerprint for a vector and its metadata."""
         h = hashlib.sha256()
         h.update(np.asarray(vector, dtype="float32").tobytes())
         h.update(json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         return h.hexdigest()
 
     def add_vector(self, index_name: str, fingerprint: str, vector: List[float], metadata: Dict[str, Any], save_after: bool = True) -> bool:
+        """
+        Adds a vector to a specified FAISS index.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): A unique identifier for the vector.
+            vector (List[float]): The vector to add.
+            metadata (Dict[str, Any]): Metadata to associate with the vector.
+            save_after (bool, optional): Whether to save the index to disk after
+                adding the vector. Defaults to True.
+
+        Returns:
+            bool: True if the vector was added successfully, False otherwise.
+        """
         with self._locks[index_name]:
             if not isinstance(vector, list) or len(vector) != self.embedding_dim:
                 logger.error(f"[F956][CAPS:VSS_ERR] Invalid embedding vector for fingerprint '{fingerprint}'. Expected dim {self.embedding_dim}, got {len(vector) if isinstance(vector,list) else 'N/A'}.")
@@ -419,7 +447,7 @@ class VectorStorageService:
                 return False
             if fingerprint in fp_data_map:
                 logger.info(f"[F956][CAPS:VSS_INFO] Fingerprint '{fingerprint}' already exists in index '{index_name}'. Vector not added. Use update methods if change is needed.")
-                return True  # Treat as success if already exists, or change behavior if strict add-new is required.
+                return True
 
             vector_np = np.array([vector], dtype='float32')
             vector_to_store = vector
@@ -435,7 +463,7 @@ class VectorStorageService:
                 index.add_with_ids(vector_np, faiss_ids_to_add)
                 current_metadata = metadata.copy()
                 current_metadata.setdefault("timestamp_utc_stored_vss", self._current_utc_iso())
-                current_metadata.setdefault("vector_content_fingerprint_vss", fingerprint)  # Redundant but explicit
+                current_metadata.setdefault("vector_content_fingerprint_vss", fingerprint)
                 current_metadata.setdefault("faiss_index_source_vss", index_name)
                 fp_data_map[fingerprint] = {
                     "faiss_id": internal_faiss_id, "metadata": current_metadata, "vector_list": vector_to_store,
@@ -481,16 +509,55 @@ class VectorStorageService:
         fingerprint: Optional[str] = None,
         save_after: bool = True,
     ) -> bool:
+        """
+        An alias for `add_vector` for compatibility.
+
+        Args:
+            index (str): The name of the index.
+            vector (List[float]): The vector to store.
+            metadata (Dict[str, Any]): Metadata associated with the vector.
+            fingerprint (Optional[str], optional): A unique identifier for the
+                vector. If not provided, one will be generated. Defaults to None.
+            save_after (bool, optional): Whether to save the index after storing.
+                Defaults to True.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         if fingerprint is None:
             fingerprint = self._make_fingerprint(vector, metadata)
         return self.add_vector(index_name=index, fingerprint=fingerprint, vector=vector, metadata=metadata, save_after=save_after)
 
     def upsert_vector(self, index_name: str, fingerprint: str, vector: List[float], metadata: Dict[str, Any], save_after: bool = True) -> bool:
+        """
+        Upserts a vector, replacing it if it already exists.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The unique identifier for the vector.
+            vector (List[float]): The vector to upsert.
+            metadata (Dict[str, Any]): Metadata associated with the vector.
+            save_after (bool, optional): Whether to save the index after upserting.
+                Defaults to True.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         with self._locks[index_name]:
             self.remove_vector(index_name, fingerprint, hard=True, save_after=False)
             return self.add_vector(index_name, fingerprint, vector, metadata, save_after=save_after)
 
     def get_vector_by_fingerprint(self, index_name: str, fingerprint: str) -> Optional[np.ndarray]:
+        """
+        Retrieves a vector by its fingerprint.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The fingerprint of the vector to retrieve.
+
+        Returns:
+            Optional[np.ndarray]: The vector as a NumPy array, or None if not found.
+        """
         with self._locks[index_name]:
             _, fp_data_map = self._get_or_init_index_components(index_name)
             if fp_data_map is None: return None
@@ -504,6 +571,23 @@ class VectorStorageService:
             return None
 
     def search_vectors(self, index_name: str, query_vector: List[float], top_k: int = 5, filter_metadata_fn: Optional[Callable[[Dict[str, Any]], bool]] = None, oversample_factor: int = 3) -> List[Tuple[str, float, Dict[str, Any]]]:
+        """
+        Searches for the most similar vectors in a specified index.
+
+        Args:
+            index_name (str): The name of the index to search in.
+            query_vector (List[float]): The vector to search for.
+            top_k (int, optional): The number of nearest neighbors to return.
+                Defaults to 5.
+            filter_metadata_fn (Optional[Callable[[Dict[str, Any]], bool]], optional):
+                A function to filter results based on metadata. Defaults to None.
+            oversample_factor (int, optional): The factor by which to oversample
+                results before filtering. Defaults to 3.
+
+        Returns:
+            A list of tuples, where each tuple contains the fingerprint,
+            similarity score, and metadata of a matching vector.
+        """
         with self._locks[index_name]:
             if not isinstance(query_vector, list) or len(query_vector) != self.embedding_dim:
                 logger.error(f"[F956][CAPS:VSS_ERR] Invalid query vector for search. Expected dim {self.embedding_dim}."); return []
@@ -514,7 +598,6 @@ class VectorStorageService:
             query_np = np.array([query_vector], dtype='float32')
             if self.default_metric_type == "IP": faiss.normalize_L2(query_np)
             
-            # Fetch more results if filtering is applied, to increase chances of getting top_k valid results.
             k_to_fetch = top_k * oversample_factor if filter_metadata_fn else top_k 
             actual_k_to_fetch = min(k_to_fetch, index.ntotal)
             if actual_k_to_fetch == 0: return []
@@ -529,8 +612,8 @@ class VectorStorageService:
                     if internal_faiss_id_val == -1: continue
                     app_fingerprint_found = seq_id_to_fp_map.get(internal_faiss_id_val)
                     if app_fingerprint_found:
-                        entry_data = fp_data_map.get(app_fingerprint_found) # Should exist
-                        if not entry_data: continue # Should not happen if seq_id_to_fp_map is correct
+                        entry_data = fp_data_map.get(app_fingerprint_found)
+                        if not entry_data: continue
 
                         full_metadata = entry_data.get("metadata", {})
                         if full_metadata.get("deleted", False): continue
@@ -544,28 +627,49 @@ class VectorStorageService:
                             l2 = np.sqrt(val) if val >= 0 else 0.0
                             similarity_score = 1.0 / (1.0 + l2)
                         
-                        similarity_score = max(0.0, min(1.0, similarity_score)) # Clamp to 0-1
+                        similarity_score = max(0.0, min(1.0, similarity_score))
                         results.append((app_fingerprint_found, round(similarity_score, 4), full_metadata))
-                        if len(results) >= top_k and not filter_metadata_fn : break # Optimization if not filtering
+                        if len(results) >= top_k and not filter_metadata_fn : break
                     else: logger.warning(f"[F956][CAPS:VSS_WARN] FAISS ID {internal_faiss_id_val} from search result in '{index_name}' not found in current id_map.")
             
-            results.sort(key=lambda x: x[1], reverse=True) # Ensure sorted by score after filtering
+            results.sort(key=lambda x: x[1], reverse=True)
             return results[:top_k]
 
     def get_metadata(self, index_name: str, fingerprint: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves the metadata for a specific vector.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The fingerprint of the vector.
+
+        Returns:
+            Optional[Dict[str, Any]]: The metadata dictionary, or None if not found.
+        """
         with self._locks[index_name]:
             _, fp_data_map = self._get_or_init_index_components(index_name)
             if fp_data_map is None: return None
             entry = fp_data_map.get(fingerprint); return entry.get("metadata") if isinstance(entry, dict) else None
 
     def update_metadata(self, index_name: str, fingerprint: str, metadata_updates: Dict[str, Any], save_after:bool = True) -> bool:
+        """
+        Updates the metadata for a specific vector.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The fingerprint of the vector to update.
+            metadata_updates (Dict[str, Any]): A dictionary of metadata fields to update.
+            save_after (bool, optional): Whether to save the index after the
+                update. Defaults to True.
+
+        Returns:
+            bool: True if the update was successful, False otherwise.
+        """
         with self._locks[index_name]:
             _, fp_data_map = self._get_or_init_index_components(index_name)
             if fp_data_map is None: return False
             if fingerprint in fp_data_map:
-                # Ensure 'metadata' key exists and is a dict
                 fp_data_map[fingerprint].setdefault("metadata", {}).update(metadata_updates)
-                # Ensure 'metadata' sub-dictionary exists before trying to set sub-key
                 if "metadata" not in fp_data_map[fingerprint]: fp_data_map[fingerprint]["metadata"] = {}
                 fp_data_map[fingerprint]["metadata"]["timestamp_utc_meta_updated_vss"] = self._current_utc_iso()
                 if save_after: self._save_index_components(index_name)
@@ -583,13 +687,26 @@ class VectorStorageService:
             else: logger.warning(f"[F956][CAPS:VSS_WARN] Fingerprint '{fingerprint}' not found in index '{index_name}'. Cannot update metadata."); return False
 
     def remove_vector(self, index_name: str, fingerprint: str, hard: bool = False, save_after: bool = True) -> bool:
+        """
+        Removes a vector from an index.
+
+        Args:
+            index_name (str): The name of the index.
+            fingerprint (str): The fingerprint of the vector to remove.
+            hard (bool, optional): If True, performs a hard delete. Otherwise,
+                performs a soft delete. Defaults to False.
+            save_after (bool, optional): Whether to save the index after removal.
+                Defaults to True.
+
+        Returns:
+            bool: True if the vector was removed successfully, False otherwise.
+        """
         with self._locks[index_name]:
             index, fp_data_map = self._get_or_init_index_components(index_name)
             if index is None or fp_data_map is None: return False
             entry_data = fp_data_map.get(fingerprint, None)
             if entry_data and isinstance(entry_data, dict) and "faiss_id" in entry_data:
                 if not hard:
-                    # Soft delete
                     if "metadata" not in entry_data: entry_data["metadata"] = {}
                     entry_data["metadata"]["deleted"] = True
                     entry_data["metadata"]["deleted_at"] = self._current_utc_iso()
@@ -597,7 +714,6 @@ class VectorStorageService:
                     if save_after: self._save_index_components(index_name)
                     return True
                 else:
-                    # Hard delete
                     internal_faiss_id = entry_data["faiss_id"]
                     ids_to_remove_np = np.array([internal_faiss_id], dtype='int64')
                     try:
@@ -640,6 +756,17 @@ class VectorStorageService:
             else: logger.debug(f"[F956][CAPS:VSS_DEBUG] Fingerprint '{fingerprint}' not found in map for index '{index_name}'. Nothing to remove."); return False
 
     def purge_deleted(self, index_name: str, save_after: bool = True) -> int:
+        """
+        Permanently removes all soft-deleted vectors from an index.
+
+        Args:
+            index_name (str): The name of the index to purge.
+            save_after (bool, optional): Whether to save the index after purging.
+                Defaults to True.
+
+        Returns:
+            int: The number of vectors purged.
+        """
         with self._locks[index_name]:
             _, fp_data_map = self._get_or_init_index_components(index_name)
             if fp_data_map is None: return 0
@@ -653,18 +780,47 @@ class VectorStorageService:
             return purged_count
 
     def count_vectors(self, index_name: str) -> int:
+        """
+        Counts the number of vectors in an index.
+
+        Args:
+            index_name (str): The name of the index.
+
+        Returns:
+            int: The number of vectors in the index.
+        """
         with self._locks[index_name]:
             index, _ = self._get_or_init_index_components(index_name); return index.ntotal if index else 0
 
     def list_fingerprints(self, index_name: str) -> List[str]:
+        """
+        Lists all vector fingerprints in an index.
+
+        Args:
+            index_name (str): The name of the index.
+
+        Returns:
+            List[str]: A list of all fingerprints in the index.
+        """
         with self._locks[index_name]:
             _, fp_data_map = self._get_or_init_index_components(index_name); return list(fp_data_map.keys()) if fp_data_map else []
 
     def get_raw_faiss_index(self, index_name: str) -> Optional[faiss.IndexIDMap]:
+        """
+        Gets the raw FAISS index object.
+
+        Args:
+            index_name (str): The name of the index.
+
+        Returns:
+            Optional[faiss.IndexIDMap]: The raw FAISS index object, or None if
+                not found.
+        """
         with self._locks[index_name]:
             index, _ = self._get_or_init_index_components(index_name); return index
 
     def save_all_managed_indexes(self):
+        """Saves all managed indexes to disk."""
         logger.info(f"[F956][CAPS:VSS_INFO] Attempting to save all {len(self._loaded_fp_to_data_maps)} managed indexes.")
         for index_name in list(self._loaded_fp_to_data_maps.keys()): self._save_index_components(index_name)
         logger.info(f"[F956][CAPS:VSS_INFO] Save all managed indexes complete.")
@@ -679,6 +835,7 @@ class VectorStorageService:
             )
 
     def close(self):
+        """Closes the service, saving all indexes and clearing caches."""
         logger.info(f"[F956][CAPS:VSS_INFO] Closing VectorStorageService: saving all indexes and clearing caches.")
         self.save_all_managed_indexes()
         self._loaded_faiss_indexes.clear(); self._loaded_fp_to_data_maps.clear(); self._next_faiss_ids.clear()
@@ -694,13 +851,24 @@ class VectorStorageService:
             )
 
     def __del__(self):
+        """Destructor to attempt saving indexes on garbage collection."""
         try:
-            if self._loaded_fp_to_data_maps:  # Check if there's anything to save
+            if self._loaded_fp_to_data_maps:
                 logger.warning(f"[F956][CAPS:VSS_WARN] VectorStorageService instance being garbage collected without explicit close(). Attempting to save indexes.")
                 self.save_all_managed_indexes()
-        except Exception: pass  # Suppress errors during interpreter shutdown
+        except Exception: pass
 
     def get_index_stats(self, index_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Gets statistics for a specific index.
+
+        Args:
+            index_name (str): The name of the index.
+
+        Returns:
+            Optional[Dict[str, Any]]: A dictionary of statistics, or None if the
+                index does not exist.
+        """
         with self._locks[index_name]:
             index, fp_data_map = self._get_or_init_index_components(index_name)
             if index and fp_data_map is not None:
@@ -720,7 +888,12 @@ class VectorStorageService:
             return None
 
     def is_ready(self) -> bool:
-        """Checks if the service was initialized successfully and essential libraries are available."""
+        """
+        Checks if the service was initialized successfully and essential libraries are available.
+
+        Returns:
+            bool: True if the service is ready, False otherwise.
+        """
         if not self._initialized_successfully:
             logger.warning(f"[F956][CAPS:VSS_WARN] VSS.is_ready: False. Basic initialization failed. Error: {self.init_error_detail}")
             return False
@@ -730,7 +903,6 @@ class VectorStorageService:
         if not NUMPY_AVAILABLE:
             logger.warning("[F956][CAPS:VSS_WARN] VSS.is_ready: False. NUMPY_AVAILABLE is False.")
             return False
-        # Check if base dir is writable by creating a temp file
         test_file = self.vector_indexes_base_dir / ".write_test.tmp"
         try:
             test_file.touch()
@@ -742,6 +914,12 @@ class VectorStorageService:
         return True
 
     def health_check(self) -> Dict[str, Any]:
+        """
+        Performs a health check on the service.
+
+        Returns:
+            Dict[str, Any]: A dictionary of health check results.
+        """
         base_dir_configured = hasattr(self, 'vector_indexes_base_dir')
         base_dir_writable = False
         if base_dir_configured:
